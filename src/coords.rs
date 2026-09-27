@@ -100,6 +100,84 @@ pub fn decode_orientation(mut rank: u32, base: u8, out: &mut [u8]) {
     out[n - 1] = (base - sum % base) % base;
 }
 
+/// Binomial coefficient C(n, k). Matches Kociemba's `c_nk` for n <= 12.
+pub fn binomial(n: usize, k: usize) -> u32 {
+    if k > n {
+        return 0;
+    }
+    let mut k = k;
+    if k > n - k {
+        k = n - k;
+    }
+    let mut s = 1u32;
+    let mut i = n;
+    let mut j = 1usize;
+    while i != n - k {
+        s *= i as u32;
+        s /= j as u32;
+        i -= 1;
+        j += 1;
+    }
+    s
+}
+
+/// Inversion parity of `perm`. 0 is even.
+pub fn permutation_parity(perm: &[u8]) -> u8 {
+    let mut inversions = 0u32;
+    for i in (1..perm.len()).rev() {
+        for j in (0..i).rev() {
+            if perm[j] > perm[i] {
+                inversions += 1;
+            }
+        }
+    }
+    (inversions & 1) as u8
+}
+
+/// UD-slice coordinate, 0..494. Positions of edges FR, FL, BL, BR, order ignored.
+pub fn ud_slice(ep: &[u8; 12]) -> u16 {
+    let mut a = 0u32;
+    let mut x = 0usize;
+    for j in (0..12).rev() {
+        if (8..=11).contains(&ep[j]) {
+            a += binomial(11 - j, x + 1);
+            x += 1;
+        }
+    }
+    a as u16
+}
+
+/// Sorted UD-slice coordinate, 0..11879. In phase 2 this is the 4! slice permutation.
+pub fn ud_slice_sorted(ep: &[u8; 12]) -> u16 {
+    let mut a = 0u32;
+    let mut x = 0usize;
+    let mut edge4 = [0u8; 4];
+    for j in (0..12).rev() {
+        if (8..=11).contains(&ep[j]) {
+            a += binomial(11 - j, x + 1);
+            edge4[3 - x] = ep[j];
+            x += 1;
+        }
+    }
+    debug_assert_eq!(x, 4, "a legal edge permutation has four slice edges");
+    let mut b = 0u32;
+    for j in (1..4).rev() {
+        let mut k = 0u32;
+        while edge4[j] != j as u8 + 8 {
+            rotate_left(&mut edge4, 0, j);
+            k += 1;
+            assert!(k <= 4, "slice edges are not FR FL BL BR");
+        }
+        b = (j as u32 + 1) * b + k;
+    }
+    (24 * a + b) as u16
+}
+
+/// Phase-2 coordinate of the eight U/D edges. They must occupy the eight U/D slots.
+pub fn ud_edges(ep: &[u8; 12]) -> u16 {
+    rank_permutation(&ep[..8]) as u16
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +230,17 @@ mod tests {
             assert_eq!(encode_orientation(&flip, 2), rank);
             assert_eq!(flip.iter().map(|d| u32::from(*d)).sum::<u32>() % 2, 0);
         }
+    }
+
+    #[test]
+    fn binomial_and_solved_slice_are_zero() {
+        assert_eq!(binomial(12, 4), 495);
+        assert_eq!(binomial(5, 2), 10);
+        assert_eq!(binomial(0, 1), 0);
+        let solved = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+        assert_eq!(ud_slice(&solved), 0);
+        assert_eq!(ud_slice_sorted(&solved), 0);
+        assert_eq!(permutation_parity(&[0, 1, 2, 3]), 0);
+        assert_eq!(permutation_parity(&[1, 0, 2, 3]), 1);
     }
 }
