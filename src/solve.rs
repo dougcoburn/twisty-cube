@@ -55,6 +55,8 @@ fn successors() -> &'static Succ {
 pub enum SolveError {
     Illegal(CubeError),
     NoSolution,
+    /// The maneuver does not restore the cube it was computed for.
+    Rejected,
 }
 
 impl std::fmt::Display for SolveError {
@@ -62,6 +64,9 @@ impl std::fmt::Display for SolveError {
         match self {
             SolveError::Illegal(err) => write!(f, "{err}"),
             SolveError::NoSolution => write!(f, "no solution of length <= {MAX_LEN}"),
+            SolveError::Rejected => {
+                write!(f, "solution failed replay against the original cube")
+            }
         }
     }
 }
@@ -124,7 +129,9 @@ impl<'a> Search<'a> {
             cube.apply(*mv);
         }
         let corners = cube.corners();
-        let ud = cube.ud_edges();
+        let Some(ud) = cube.ud_edges() else {
+            return false;
+        };
         let slice = cube.slice_sorted();
         debug_assert!(slice < 24);
         let budget = MAX_LEN - phase1_len;
@@ -198,10 +205,22 @@ pub fn solve(cube: &CubieCube, tables: &Tables) -> Result<Vec<Move>, SolveError>
     };
     for target in lower..=MAX_LEN {
         if search.phase1(twist, flip, slice_sorted, 0, target) {
-            return Ok(search.path[..search.found].to_vec());
+            let moves = search.path[..search.found].to_vec();
+            if !replays_to_solved(cube, &moves) {
+                return Err(SolveError::Rejected);
+            }
+            return Ok(moves);
         }
     }
     Err(SolveError::NoSolution)
+}
+
+fn replays_to_solved(start: &CubieCube, moves: &[Move]) -> bool {
+    let mut cube = *start;
+    for mv in moves {
+        cube.apply(*mv);
+    }
+    cube == CubieCube::solved()
 }
 
 /// Space-separated names, or `0` when the cube is already solved.

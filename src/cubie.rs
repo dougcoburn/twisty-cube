@@ -140,10 +140,13 @@ impl CubieCube {
         crate::coords::rank_permutation(&self.cp) as u16
     }
 
-    /// Permutation coordinate of the eight U/D edges. Valid when those edges
-    /// occupy the eight U/D slots (every position in subgroup H).
-    pub fn ud_edges(&self) -> u16 {
-        crate::coords::ud_edges(&self.ep)
+    /// Permutation coordinate of the eight U/D edges.
+    /// `None` unless those edges occupy the eight U/D slots, which is every cube in H.
+    pub fn ud_edges(&self) -> Option<u16> {
+        if !ud_edges_in_place(&self.ep) {
+            return None;
+        }
+        Some(crate::coords::ud_edges(&self.ep))
     }
 
     pub fn slice_sorted(&self) -> u16 {
@@ -203,14 +206,15 @@ impl CubieCube {
     }
 }
 
-/// Phase-1 and phase-2 coordinates. All six are 0 on the solved cube.
+/// Phase-1 and phase-2 coordinates. The solved cube is all zeros.
+/// `ud_edges` is `None` outside H, where that permutation is not defined.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CubeCoords {
     pub twist: u16,
     pub flip: u16,
     pub slice: u16,
     pub corners: u16,
-    pub ud_edges: u16,
+    pub ud_edges: Option<u16>,
     pub slice_sorted: u16,
 }
 
@@ -220,7 +224,7 @@ impl CubeCoords {
         flip: 0,
         slice: 0,
         corners: 0,
-        ud_edges: 0,
+        ud_edges: Some(0),
         slice_sorted: 0,
     };
 }
@@ -233,6 +237,7 @@ pub enum CubeError {
     Twist,
     Flip,
     Parity,
+    Center,
 }
 
 impl std::fmt::Display for CubeError {
@@ -253,8 +258,21 @@ impl std::fmt::Display for CubeError {
             CubeError::Twist => write!(f, "total corner twist is not divisible by 3"),
             CubeError::Flip => write!(f, "total edge flip is odd"),
             CubeError::Parity => write!(f, "corner and edge permutation parities differ"),
+            CubeError::Center => write!(f, "centers must be U R F D L B"),
         }
     }
+}
+
+/// The eight U/D edge cubies occupy positions UR..DB.
+fn ud_edges_in_place(ep: &[u8; EDGE_COUNT]) -> bool {
+    let mut seen = [false; 8];
+    for &edge in &ep[..8] {
+        if edge > 7 || seen[edge as usize] {
+            return false;
+        }
+        seen[edge as usize] = true;
+    }
+    true
 }
 
 impl std::error::Error for CubeError {}

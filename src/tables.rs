@@ -1,9 +1,10 @@
 //! Move tables and split pruning tables for two-phase search.
 //!
-//! Raw little-endian files live in `tables/`. A later run maps those files
-//! instead of rebuilding them. Depths are uncompressed `u8` values. Phase 1 is
-//! pruned on twist×slice and flip×slice; phase 2 on corners×slice permutation
-//! and UD-edges×slice permutation. No symmetry reduction.
+//! Raw little-endian files live in `tables/`, with a versioned CRC-32 manifest.
+//! A later run maps those files only when every checksum matches. Depths are
+//! uncompressed `u8` values. Phase 1 is pruned on twist×slice and flip×slice;
+//! phase 2 on corners×slice permutation and UD-edges×slice permutation.
+//! No symmetry reduction.
 
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -27,6 +28,9 @@ pub const TABLE_BUDGET: u64 = 200 * 1024 * 1024;
 pub const UD_EDGES_INVALID: u16 = u16::MAX;
 
 const UNSEEN: u8 = 255;
+const FORMAT_VERSION: u32 = 1;
+const MANIFEST: &str = "manifest.bin";
+const MANIFEST_MAGIC: &[u8; 4] = b"CUBT";
 
 struct Spec {
     name: &'static str,
@@ -167,19 +171,28 @@ impl Tables {
 /// Build any missing table file, then map the directory.
 pub fn load_or_generate(dir: &Path) -> io::Result<LoadedTables> {
     fs::create_dir_all(dir)?;
-    let mapped = files_ready(dir);
+    let mapped = checksums_match(dir);
     if !mapped {
         let built = build_tables()?;
         write_tables(dir, &built)?;
+        if !checksums_match(dir) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "wrote tables that do not match their manifest",
+            ));
+        }
     }
     let tables = map_tables(dir)?;
-    let files = specs()
+    let mut files = specs()
         .into_iter()
         .map(|spec| {
             let path = dir.join(spec.name);
             (path.display().to_string(), spec.bytes as u64)
         })
         .collect::<Vec<_>>();
+    let manifest_path = dir.join(MANIFEST);
+    let manifest_len = fs::metadata(&manifest_path)?.len();
+    files.push((manifest_path.display().to_string(), manifest_len));
     let total = files.iter().map(|(_, n)| *n).sum::<u64>();
     if total > TABLE_BUDGET {
         return Err(io::Error::new(
@@ -302,7 +315,9 @@ fn ud_edges_move_table() -> Vec<u16> {
             }
             let mut next = cube;
             next.apply(mv);
-            table[coord * MOVE_COUNT + mv as usize] = next.ud_edges();
+            table[coord * MOVE_COUNT + mv as usize] = next
+                .ud_edges()
+                .expect("phase-2 move keeps UD edges in their slots");
         }
     }
     table
@@ -359,10 +374,10 @@ fn write_tables(dir: &Path, built: &Built) -> io::Result<()> {
         ("prune_corners.bin", built.prune_corners.clone()),
         ("prune_ud_edges.bin", built.prune_ud_edges.clone()),
     ];
-    for (name, bytes) in files {
+    for (name, bytes) in &files {
         let expected = specs()
             .into_iter()
-            .find(|spec| spec.name == name)
+            .find(|spec| spec.name == *name)
             .map(|spec| spec.bytes)
             .expect("table name");
         if bytes.len() != expected {
@@ -371,8 +386,13 @@ fn write_tables(dir: &Path, built: &Built) -> io::Result<()> {
                 format!("{name} is {} bytes, expected {expected}", bytes.len()),
             ));
         }
-        write_atomic(dir, name, &bytes)?;
+        write_atomic(dir, name, bytes)?;
     }
+    let crcs = files
+        .iter()
+        .map(|(_, bytes)| crc32(bytes))
+        .collect::<Vec<_>>();
+    write_atomic(dir, MANIFEST, &manifest_bytes(&crcs))?;
     Ok(())
 }
 
@@ -395,15 +415,64 @@ fn u16_bytes(data: &[u16]) -> Vec<u8> {
     out
 }
 
-fn files_ready(dir: &Path) -> bool {
-    specs().iter().all(|spec| {
-        fs::metadata(dir.join(spec.name))
-            .map(|meta| meta.len() as usize == spec.bytes)
-            .unwrap_or(false)
-    })
+fn checksums_match(dir: &Path) -> bool {
+    let Ok(manifest) = fs::read(dir.join(MANIFEST)) else {
+        return false;
+    };
+    let specs = specs();
+    let expected_len = 8 + 4 * specs.len();
+    if manifest.len() != expected_len || &manifest[..4] != MANIFEST_MAGIC {
+        return false;
+    }
+    let version = u32::from_le_bytes(manifest[4..8].try_into().unwrap());
+    if version != FORMAT_VERSION {
+        return false;
+    }
+    for (i, spec) in specs.iter().enumerate() {
+        let Ok(bytes) = fs::read(dir.join(spec.name)) else {
+            return false;
+        };
+        if bytes.len() != spec.bytes {
+            return false;
+        }
+        let stored = u32::from_le_bytes(manifest[8 + i * 4..12 + i * 4].try_into().unwrap());
+        if crc32(&bytes) != stored {
+            return false;
+        }
+    }
+    true
+}
+
+fn manifest_bytes(crcs: &[u32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 + 4 * crcs.len());
+    out.extend_from_slice(MANIFEST_MAGIC);
+    out.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+    for crc in crcs {
+        out.extend_from_slice(&crc.to_le_bytes());
+    }
+    out
+}
+
+/// IEEE CRC-32.
+fn crc32(data: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for &byte in data {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            let mask = (crc & 1).wrapping_neg();
+            crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
+        }
+    }
+    !crc
 }
 
 fn map_tables(dir: &Path) -> io::Result<Tables> {
+    if !checksums_match(dir) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "table checksum or format version does not match",
+        ));
+    }
     let mut maps = Vec::with_capacity(10);
     for spec in specs() {
         maps.push(map_file(&dir.join(spec.name), spec.bytes)?);
@@ -452,4 +521,14 @@ fn depth_span(bytes: &[u8]) -> (u8, usize) {
         }
     }
     (max, unseen)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crc32_matches_the_ieee_check_value() {
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+    }
 }

@@ -94,7 +94,7 @@ fn tables_generate_then_mmap_and_match_cubie_moves() {
             if PHASE2_MOVES.contains(&mv) {
                 let mut next = cube;
                 next.apply(mv);
-                assert_eq!(tables.ud_edges_move(ud, mv), next.ud_edges());
+                assert_eq!(tables.ud_edges_move(ud, mv), next.ud_edges().unwrap());
             } else {
                 assert_eq!(tables.ud_edges_move(ud, mv), UD_EDGES_INVALID);
             }
@@ -121,6 +121,17 @@ fn tables_generate_then_mmap_and_match_cubie_moves() {
     assert_eq!(stamp, stamp_after);
     assert_eq!(mapped.tables.twist_move(0, Move::F1), f.twist());
     assert_eq!(mapped.tables.prune_twist_slice(f.twist(), f.slice()), 1);
+    drop(mapped);
+
+    let twist_path = dir.join("twist_move.bin");
+    let original = fs::read(&twist_path).unwrap();
+    let mut corrupt = original.clone();
+    corrupt[0] ^= 0xff;
+    fs::write(&twist_path, &corrupt).unwrap();
+    let rebuilt = load_or_generate(&dir).unwrap();
+    assert!(!rebuilt.mapped);
+    assert_eq!(fs::read(&twist_path).unwrap(), original);
+    assert_eq!(rebuilt.tables.twist_move(0, Move::U1), 0);
 
     let _ = fs::remove_dir_all(&dir);
 }

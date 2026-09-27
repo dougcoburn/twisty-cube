@@ -83,6 +83,11 @@ pub fn cubie_from_facelets(facelets: &str) -> Result<CubieCube, CubeError> {
     if count != [9; 6] {
         return Err(CubeError::FaceletColor);
     }
+    for face in 0..6 {
+        if color[face * 9 + 4] != face as u8 {
+            return Err(CubeError::Center);
+        }
+    }
 
     let mut cube = CubieCube::solved();
     cube.cp = [255; 8];
@@ -95,10 +100,12 @@ pub fn cubie_from_facelets(facelets: &str) -> Result<CubieCube, CubeError> {
         let Some(ori) = (0..3).find(|&o| color[fac[o]] == 0 || color[fac[o]] == 3) else {
             return Err(CubeError::UndefinedCubie);
         };
+        let ud = color[fac[ori]];
         let col1 = color[fac[(ori + 1) % 3]];
         let col2 = color[fac[(ori + 2) % 3]];
-        let Some(j) = (0..8).find(|&j| CORNER_COLOR[j][1] == col1 && CORNER_COLOR[j][2] == col2)
-        else {
+        let Some(j) = (0..8).find(|&j| {
+            CORNER_COLOR[j][0] == ud && CORNER_COLOR[j][1] == col1 && CORNER_COLOR[j][2] == col2
+        }) else {
             return Err(CubeError::UndefinedCubie);
         };
         cube.cp[i] = j as u8;
