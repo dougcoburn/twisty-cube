@@ -111,6 +111,45 @@ pub const fn move_allowed(prev: Option<Move>, next: Move) -> bool {
     next_move_mask(prev) & (1u32 << next as u8) != 0
 }
 
+/// Parse a space-separated Singmaster maneuver: `U`, `U2`, `U'`.
+pub fn parse_moves(text: &str) -> Result<Vec<Move>, String> {
+    let mut moves = Vec::new();
+    for token in text.split_whitespace() {
+        let Some(mv) = parse_move(token) else {
+            return Err(format!("unknown move {token}"));
+        };
+        moves.push(mv);
+    }
+    Ok(moves)
+}
+
+fn parse_move(token: &str) -> Option<Move> {
+    let bytes = token.as_bytes();
+    if bytes.is_empty() || bytes.len() > 2 {
+        return None;
+    }
+    let face = match bytes[0] {
+        b'U' => 0,
+        b'R' => 1,
+        b'F' => 2,
+        b'D' => 3,
+        b'L' => 4,
+        b'B' => 5,
+        _ => return None,
+    };
+    let power = if bytes.len() == 1 {
+        0
+    } else {
+        match bytes[1] {
+            b'2' => 1,
+            b'\'' => 2,
+            b'3' => 2,
+            _ => return None,
+        }
+    };
+    Some(Move::from_index(face * 3 + power))
+}
+
 const fn basic_move(face: usize) -> CubieCube {
     // cp, co, ep, eo copied from Kociemba's basic face turns.
     const CP: [[u8; 8]; 6] = [
