@@ -178,6 +178,57 @@ pub fn ud_edges(ep: &[u8; 12]) -> u16 {
     rank_permutation(&ep[..8]) as u16
 }
 
+/// Edge permutation with UD-slice coordinate `idx` (0..494) and slice edges in order FR FL BL BR.
+pub fn edges_from_ud_slice(idx: u16) -> [u8; 12] {
+    edges_from_slice_sorted(idx * 24)
+}
+
+/// Edge permutation with sorted UD-slice coordinate `idx` (0..11879).
+pub fn edges_from_slice_sorted(idx: u16) -> [u8; 12] {
+    let mut b = u32::from(idx % 24);
+    let mut a = u32::from(idx / 24);
+    let mut slice_edge = [8u8, 9, 10, 11];
+    let other = [0u8, 1, 2, 3, 4, 5, 6, 7];
+    let mut j = 1usize;
+    while j < 4 {
+        let mut k = b % (j as u32 + 1);
+        b /= j as u32 + 1;
+        while k > 0 {
+            rotate_right(&mut slice_edge, 0, j);
+            k -= 1;
+        }
+        j += 1;
+    }
+
+    let mut ep = [255u8; 12];
+    let mut x = 4usize;
+    for pos in 0..12 {
+        let choose = binomial(11 - pos, x);
+        if a >= choose {
+            ep[pos] = slice_edge[4 - x];
+            a -= choose;
+            x -= 1;
+        }
+    }
+    debug_assert_eq!(x, 0);
+    debug_assert_eq!(a, 0);
+    let mut o = 0usize;
+    for pos in 0..12 {
+        if ep[pos] == 255 {
+            ep[pos] = other[o];
+            o += 1;
+        }
+    }
+    ep
+}
+
+/// UD edges at coordinate `idx` (0..40319), slice edges solved in place.
+pub fn edges_from_ud_edges(idx: u16) -> [u8; 12] {
+    let mut ep = [8, 9, 10, 11, 0, 0, 0, 0, 8, 9, 10, 11];
+    unrank_permutation(8, u32::from(idx), &mut ep[..8]);
+    ep
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,5 +293,23 @@ mod tests {
         assert_eq!(ud_slice_sorted(&solved), 0);
         assert_eq!(permutation_parity(&[0, 1, 2, 3]), 0);
         assert_eq!(permutation_parity(&[1, 0, 2, 3]), 1);
+    }
+
+    #[test]
+    fn slice_coordinates_roundtrip() {
+        for idx in 0..495u16 {
+            let ep = edges_from_ud_slice(idx);
+            assert_eq!(ud_slice(&ep), idx);
+            assert_eq!(ud_slice_sorted(&ep) % 24, 0);
+        }
+        for idx in 0..11_880u16 {
+            let ep = edges_from_slice_sorted(idx);
+            assert_eq!(ud_slice_sorted(&ep), idx);
+        }
+        for idx in [0u16, 1, 24, 1000, 40319] {
+            let ep = edges_from_ud_edges(idx);
+            assert_eq!(ud_edges(&ep), idx);
+            assert_eq!(ep[8..], [8, 9, 10, 11]);
+        }
     }
 }

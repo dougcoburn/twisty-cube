@@ -1,7 +1,10 @@
-//! `cube-cli gen-tables` and `cube-cli solve` — the commands exist;
-//! table generation is session 2 and the search is session 3.
+//! `cube-cli gen-tables` writes or maps `./tables`. Search is session 3.
+
+use std::path::PathBuf;
+use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use cube_cli::load_or_generate;
 
 #[derive(Parser)]
 #[command(name = "cube-cli", about = "Two-phase Rubik's cube solver")]
@@ -12,8 +15,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Generate move and prune tables into ./tables.
-    GenTables,
+    /// Generate move and prune tables, or map them if they are already on disk.
+    GenTables {
+        /// Directory of raw table files. Created if missing.
+        #[arg(long, default_value = "tables")]
+        dir: PathBuf,
+    },
     /// Solve a cube. Two-phase search is session 3.
     Solve {
         /// 54 facelets in URFDLB order.
@@ -28,13 +35,26 @@ enum Command {
     },
 }
 
-fn main() {
+fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
-        Command::GenTables => {
-            eprintln!("gen-tables is not implemented yet (session 2)");
-            std::process::exit(1);
-        }
+        Command::GenTables { dir } => match load_or_generate(&dir) {
+            Ok(loaded) => {
+                let verb = if loaded.mapped { "mapped" } else { "wrote" };
+                for (path, bytes) in &loaded.files {
+                    println!("{verb} {path}  {bytes}");
+                }
+                println!("total {} bytes", loaded.total_bytes());
+                for (name, depth, unseen) in loaded.tables.prune_summary() {
+                    println!("{name} max depth {depth}, unfilled {unseen}");
+                }
+                ExitCode::SUCCESS
+            }
+            Err(err) => {
+                eprintln!("gen-tables: {err}");
+                ExitCode::from(1)
+            }
+        },
         Command::Solve {
             facelets: _,
             moves: _,
@@ -42,10 +62,10 @@ fn main() {
         } => {
             if mode != "twophase" {
                 eprintln!("unknown mode {mode:?}; only twophase is planned");
-                std::process::exit(2);
+                return ExitCode::from(2);
             }
             eprintln!("solve is not implemented yet (session 3)");
-            std::process::exit(1);
+            ExitCode::from(1)
         }
     }
 }

@@ -88,6 +88,42 @@ impl CubieCube {
         *self = self.multiplied(crate::moves::MOVE_CUBE[m as usize]);
     }
 
+    pub fn with_twist(twist: u16) -> Self {
+        let mut cube = Self::solved();
+        crate::coords::decode_orientation(u32::from(twist), 3, &mut cube.co);
+        cube
+    }
+
+    pub fn with_flip(flip: u16) -> Self {
+        let mut cube = Self::solved();
+        crate::coords::decode_orientation(u32::from(flip), 2, &mut cube.eo);
+        cube
+    }
+
+    pub fn with_slice(slice: u16) -> Self {
+        let mut cube = Self::solved();
+        cube.ep = crate::coords::edges_from_ud_slice(slice);
+        cube
+    }
+
+    pub fn with_slice_sorted(idx: u16) -> Self {
+        let mut cube = Self::solved();
+        cube.ep = crate::coords::edges_from_slice_sorted(idx);
+        cube
+    }
+
+    pub fn with_corners(corners: u16) -> Self {
+        let mut cube = Self::solved();
+        crate::coords::unrank_permutation(8, u32::from(corners), &mut cube.cp);
+        cube
+    }
+
+    pub fn with_ud_edges(ud: u16) -> Self {
+        let mut cube = Self::solved();
+        cube.ep = crate::coords::edges_from_ud_edges(ud);
+        cube
+    }
+
     pub fn twist(&self) -> u16 {
         crate::coords::encode_orientation(&self.co, 3) as u16
     }

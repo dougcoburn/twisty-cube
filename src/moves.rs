@@ -170,3 +170,23 @@ pub const MOVE_CUBE: [CubieCube; MOVE_COUNT] = {
     }
     out
 };
+
+/// Generators of H: U, D, and 180° turns of R, F, L, B.
+pub const PHASE2_MOVES: [Move; 10] = [
+    Move::U1,
+    Move::U2,
+    Move::U3,
+    Move::D1,
+    Move::D2,
+    Move::D3,
+    Move::R2,
+    Move::F2,
+    Move::L2,
+    Move::B2,
+];
+
+pub const fn phase2_move(m: Move) -> bool {
+    let power = m.power();
+    let face = m.face();
+    power == 1 || face == 0 || face == 3
+}
