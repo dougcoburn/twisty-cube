@@ -3,8 +3,8 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use cube_cli::{
-    format_report, load_optimal, move_allowed, parse_moves, reid_h, solve, solve_optimal,
-    CubieCube, Move, OptimalError, ALL_MOVES,
+    format_report, load_optimal, load_or_generate, move_allowed, parse_moves, reid_h, solve,
+    solve_optimal, CubieCube, Move, OptimalError, ALL_MOVES,
 };
 
 fn tables() -> &'static cube_cli::Tables {
@@ -36,14 +36,14 @@ fn assert_solves(start: &CubieCube, moves: &[Move]) {
 #[test]
 fn heuristic_is_zero_only_on_solved_and_one_on_a_single_turn() {
     let tables = tables();
-    assert_eq!(reid_h(&CubieCube::solved(), tables), 0);
+    assert_eq!(reid_h(&CubieCube::solved(), tables).unwrap(), 0);
     let mut turned = CubieCube::solved();
     turned.apply(Move::U1);
-    assert_eq!(reid_h(&turned, tables), 1);
+    assert_eq!(reid_h(&turned, tables).unwrap(), 1);
     for &mv in &ALL_MOVES {
         let mut cube = CubieCube::solved();
         cube.apply(mv);
-        let h = reid_h(&cube, tables);
+        let h = reid_h(&cube, tables).unwrap();
         if mv.power() == 1 {
             assert!(h <= 1, "{mv} h={h}");
         } else {
@@ -58,7 +58,7 @@ fn heuristic_is_zero_only_on_solved_and_one_on_a_single_turn() {
     let mut queue = VecDeque::new();
     queue.push_back((CubieCube::solved(), 0u8, None));
     while let Some((cube, depth, prev)) = queue.pop_front() {
-        let h = reid_h(&cube, tables);
+        let h = reid_h(&cube, tables).unwrap();
         assert!(h as u8 <= depth || depth == 0);
         if depth == 3 || seen.len() > 8_000 {
             continue;
@@ -79,7 +79,7 @@ fn heuristic_is_zero_only_on_solved_and_one_on_a_single_turn() {
     assert!(superflip.cp == CubieCube::solved().cp);
     assert!(superflip.co == CubieCube::solved().co);
     assert!(superflip.eo.iter().all(|&o| o == 1));
-    let h = reid_h(&superflip, tables);
+    let h = reid_h(&superflip, tables).unwrap();
     assert!(h >= 8 && h < 20, "superflip h = {h}");
 }
 
@@ -145,7 +145,7 @@ fn superflip_heuristic_is_at_least_8_and_the_generator_is_20() {
     assert_eq!(superflip.cp, CubieCube::solved().cp);
     assert_eq!(superflip.co, [0; 8]);
     assert!(superflip.eo.iter().all(|&flip| flip == 1));
-    let h = reid_h(&superflip, tables);
+    let h = reid_h(&superflip, tables).unwrap();
     assert!(h >= 8 && h < 20, "superflip h = {h}");
     let mut undone = superflip;
     for mv in parse_moves(maneuver).unwrap().into_iter().rev() {
@@ -158,7 +158,7 @@ fn superflip_heuristic_is_at_least_8_and_the_generator_is_20() {
 fn superflip_below_the_heuristic_returns_immediately() {
     let tables = tables();
     let superflip = apply_all("U R2 F B R B2 R U2 L B2 R U' D' R2 F R' L B2 U2 F2");
-    let h = reid_h(&superflip, tables) as usize;
+    let h = reid_h(&superflip, tables).unwrap() as usize;
     assert!(h >= 8);
     let start = Instant::now();
     let too_short = solve_optimal(&superflip, tables, 0).unwrap_err();
@@ -169,10 +169,33 @@ fn superflip_below_the_heuristic_returns_immediately() {
 }
 
 #[test]
+fn optimal_without_phase1_returns_missing_tables() {
+    let dir = std::env::temp_dir().join(format!("cube-cli-nophase1-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let loaded = load_or_generate(&dir).unwrap();
+    assert!(loaded.tables.phase1_prun().is_none());
+    let mut turned = CubieCube::solved();
+    turned.apply(Move::U1);
+    assert_eq!(
+        solve_optimal(&turned, &loaded.tables, 20).unwrap_err(),
+        OptimalError::MissingTables
+    );
+    assert_eq!(
+        solve_optimal(&CubieCube::solved(), &loaded.tables, 20).unwrap_err(),
+        OptimalError::MissingTables
+    );
+    assert_eq!(
+        reid_h(&turned, &loaded.tables).unwrap_err(),
+        OptimalError::MissingTables
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 #[ignore = "exhaustive superflip proof searches about 3e9 nodes"]
 fn superflip_optimal_length_is_20() {
     let tables = tables();
-    let _ = reid_h(&CubieCube::solved(), tables);
+    let _ = reid_h(&CubieCube::solved(), tables).unwrap();
     let superflip = apply_all("U R2 F B R B2 R U2 L B2 R U' D' R2 F R' L B2 U2 F2");
     let start = Instant::now();
     let solution = solve_optimal(&superflip, tables, 20).unwrap();

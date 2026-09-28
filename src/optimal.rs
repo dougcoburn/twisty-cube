@@ -86,6 +86,8 @@ pub enum OptimalError {
     Illegal(CubeError),
     NoSolution,
     Rejected,
+    /// `load_or_generate` does not build `phase1_prun.bin`. Use `load_optimal`.
+    MissingTables,
 }
 
 impl std::fmt::Display for OptimalError {
@@ -94,6 +96,9 @@ impl std::fmt::Display for OptimalError {
             OptimalError::Illegal(err) => write!(f, "{err}"),
             OptimalError::NoSolution => write!(f, "no solution within the bound"),
             OptimalError::Rejected => write!(f, "solution failed replay against the original cube"),
+            OptimalError::MissingTables => {
+                write!(f, "optimal tables are missing; call load_optimal")
+            }
         }
     }
 }
@@ -186,22 +191,20 @@ fn corner_distance() -> &'static [u8] {
     })
 }
 
-fn phase1(tables: &Tables) -> &[u8] {
-    tables
-        .phase1_prun()
-        .expect("optimal search requires phase1_prun.bin")
+fn phase1(tables: &Tables) -> Result<&[u8], OptimalError> {
+    tables.phase1_prun().ok_or(OptimalError::MissingTables)
 }
 
 /// Distance lower bound. Zero only for the solved cube.
-pub fn reid_h(cube: &CubieCube, tables: &Tables) -> u8 {
+pub fn reid_h(cube: &CubieCube, tables: &Tables) -> Result<u8, OptimalError> {
     if *cube == CubieCube::solved() {
-        return 0;
+        return Ok(0);
     }
     let index = sym_index();
     let axes = axes_of(cube, index);
-    let phase = axis_bound(&axes, index, phase1(tables));
+    let phase = axis_bound(&axes, index, phase1(tables)?);
     let corners = corner_distance()[cube.corners() as usize];
-    phase.max(corners)
+    Ok(phase.max(corners))
 }
 
 fn axis_index(index: &SymIndex, axis: Axis) -> usize {
@@ -366,7 +369,7 @@ fn search_from(
     let conj = conj_moves(index);
     let axes = axes_of(cube, index);
     let succ = successors();
-    let prun = phase1(tables);
+    let prun = phase1(tables)?;
     let bits = if lower >= 8 {
         Some(phase_bits(prun))
     } else {
@@ -407,6 +410,9 @@ pub fn solve_optimal(
     max_bound: usize,
 ) -> Result<OptimalSolve, OptimalError> {
     cube.check().map_err(OptimalError::Illegal)?;
+    if tables.phase1_prun().is_none() {
+        return Err(OptimalError::MissingTables);
+    }
     let max_bound = max_bound.min(MAX_GOD);
     if *cube == CubieCube::solved() {
         return Ok(OptimalSolve {
@@ -414,7 +420,7 @@ pub fn solve_optimal(
             nodes: 0,
         });
     }
-    let mut lower = reid_h(cube, tables) as usize;
+    let mut lower = reid_h(cube, tables)? as usize;
     if lower == 0 {
         lower = 1;
     }
@@ -489,7 +495,7 @@ fn solve_superflip(
     let mut reduced = *cube;
     reduced.apply(Move::U1);
     reduced.apply(Move::R2);
-    let lower = reid_h(&reduced, tables) as usize;
+    let lower = reid_h(&reduced, tables)? as usize;
     eprintln!("superflip: proving no solution of superflip U R2 through 17 (h={lower})");
     let started = std::time::Instant::now();
     let nodes = prove_beyond(&reduced, tables, lower.max(1), 17)?;
@@ -517,7 +523,7 @@ fn prove_beyond(
     let conj = conj_moves(index);
     let root_axes = axes_of(cube, index);
     let succ = successors();
-    let prun = phase1(tables);
+    let prun = phase1(tables)?;
     let bits = phase_bits(prun);
     let root_dist = raw_dist(index, prun, &root_axes);
     let found = AtomicBool::new(false);
