@@ -1,8 +1,8 @@
 use serde::Serialize;
 
 use cube_cli::{
-    facelets_after_moves, find_tables_dir, parse_facelets, scramble_facelets, solve_twophase,
-    to_facelets, CubieCube,
+    facelets_after_moves, find_tables_dir, parse_facelets, scramble_facelets,
+    solve_twophase as search_twophase, to_facelets, CubieCube,
 };
 
 #[derive(Serialize)]
@@ -32,27 +32,27 @@ fn names(moves: &[cube_cli::Move]) -> Vec<String> {
 }
 
 #[tauri::command]
-fn get_solved() -> CubeState {
+pub fn get_solved() -> CubeState {
     CubeState {
         facelets: to_facelets(&CubieCube::solved()),
     }
 }
 
 #[tauri::command]
-fn apply_moves(facelets: String, moves: String) -> Result<CubeState, String> {
+pub fn apply_moves(facelets: String, moves: String) -> Result<CubeState, String> {
     let facelets = facelets_after_moves(&facelets, &moves).map_err(|err| err.to_string())?;
     Ok(CubeState { facelets })
 }
 
 #[tauri::command]
-fn validate_facelets(facelets: String) -> Result<(), String> {
+pub fn validate_facelets(facelets: String) -> Result<(), String> {
     parse_facelets(&facelets)
         .map(|_| ())
         .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
-fn scramble(n: u32) -> ScrambleOk {
+pub fn scramble(n: u32) -> ScrambleOk {
     let (moves, facelets) = scramble_facelets(n);
     ScrambleOk {
         moves: names(&moves),
@@ -61,7 +61,7 @@ fn scramble(n: u32) -> ScrambleOk {
 }
 
 #[tauri::command]
-async fn solve_twophase(facelets: String) -> Result<SolveOk, String> {
+pub async fn solve_twophase(facelets: String) -> Result<SolveOk, String> {
     tauri::async_runtime::spawn_blocking(move || solve_blocking(facelets))
         .await
         .map_err(|err| format!("solve task failed: {err}"))?
@@ -70,7 +70,7 @@ async fn solve_twophase(facelets: String) -> Result<SolveOk, String> {
 fn solve_blocking(facelets: String) -> Result<SolveOk, String> {
     let cube = parse_facelets(&facelets).map_err(|err| err.to_string())?;
     let dir = find_tables_dir().map_err(|err| err.to_string())?;
-    let solved = solve_twophase(&cube, &dir).map_err(|err| err.to_string())?;
+    let solved = search_twophase(&cube, &dir).map_err(|err| err.to_string())?;
     Ok(SolveOk {
         length: solved.moves.len(),
         optimal: false,
