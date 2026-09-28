@@ -19,6 +19,10 @@ fn tables_generate_then_mmap_and_match_cubie_moves() {
     assert!(!generated.mapped);
     assert!(generated.total_bytes() < TABLE_BUDGET);
     assert!(generated.total_bytes() > 1_000_000);
+    assert!(
+        !dir.join("phase1_prun.bin").exists(),
+        "two-phase load must not build the optimal prune"
+    );
 
     let tables = &generated.tables;
     for (name, depth, unseen) in tables.prune_summary() {

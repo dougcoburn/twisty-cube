@@ -23,6 +23,6 @@ pub use moves::{
 pub use optimal::{reid_h, solve_optimal, OptimalError, OptimalSolve};
 pub use solve::{format_report, format_solution, solve, SolveError};
 pub use tables::{
-    load_or_generate, LoadedTables, Tables, N_CORNERS, N_FLIP, N_SLICE, N_SLICE_PERM,
+    load_optimal, load_or_generate, LoadedTables, Tables, N_CORNERS, N_FLIP, N_SLICE, N_SLICE_PERM,
     N_SLICE_SORTED, N_TWIST, N_UD_EDGES, TABLE_BUDGET, UD_EDGES_INVALID,
 };

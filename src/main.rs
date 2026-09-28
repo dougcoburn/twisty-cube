@@ -6,8 +6,8 @@ use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 use cube_cli::{
-    cubie_from_facelets, format_report, load_or_generate, parse_moves, solve, solve_optimal,
-    CubieCube,
+    cubie_from_facelets, format_report, load_optimal, load_or_generate, parse_moves, solve,
+    solve_optimal, CubieCube,
 };
 
 #[derive(Parser)]
@@ -22,11 +22,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Generate move and prune tables, or map them if they are already on disk.
+    /// Generate two-phase tables, or map them if they are already on disk.
     GenTables {
         /// Directory of raw table files. Created if missing.
         #[arg(long, default_value = "tables")]
         dir: PathBuf,
+        /// Also build `phase1_prun.bin`, the exact table used by `--mode optimal`.
+        #[arg(long)]
+        optimal: bool,
     },
     /// Solve a cube. `twophase` is fast; `optimal` returns a shortest HTM solution.
     Solve {
@@ -37,6 +40,7 @@ enum Command {
         #[arg(long)]
         moves: Option<String>,
         /// `twophase` (default, not always shortest) or `optimal` (shortest face turns).
+        /// Optimal loads `phase1_prun.bin` and builds it on first use.
         #[arg(long, default_value = "twophase")]
         mode: String,
         /// Directory of raw table files. Created if missing.
@@ -51,23 +55,30 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
-        Command::GenTables { dir } => match load_or_generate(&dir) {
-            Ok(loaded) => {
-                let verb = if loaded.mapped { "mapped" } else { "wrote" };
-                for (path, bytes) in &loaded.files {
-                    println!("{verb} {path}  {bytes}");
+        Command::GenTables { dir, optimal } => {
+            let loaded = if optimal {
+                load_optimal(&dir)
+            } else {
+                load_or_generate(&dir)
+            };
+            match loaded {
+                Ok(loaded) => {
+                    let verb = if loaded.mapped { "mapped" } else { "wrote" };
+                    for (path, bytes) in &loaded.files {
+                        println!("{verb} {path}  {bytes}");
+                    }
+                    println!("total {} bytes", loaded.total_bytes());
+                    for (name, depth, unseen) in loaded.tables.prune_summary() {
+                        println!("{name} max depth {depth}, unfilled {unseen}");
+                    }
+                    ExitCode::SUCCESS
                 }
-                println!("total {} bytes", loaded.total_bytes());
-                for (name, depth, unseen) in loaded.tables.prune_summary() {
-                    println!("{name} max depth {depth}, unfilled {unseen}");
+                Err(err) => {
+                    eprintln!("gen-tables: {err}");
+                    ExitCode::from(1)
                 }
-                ExitCode::SUCCESS
             }
-            Err(err) => {
-                eprintln!("gen-tables: {err}");
-                ExitCode::from(1)
-            }
-        },
+        }
         Command::Solve {
             facelets,
             moves,
@@ -119,7 +130,12 @@ fn solve_cli(
             return Err(ExitCode::from(1));
         }
     };
-    let loaded = load_or_generate(dir).map_err(|err| {
+    let loaded = if mode == "optimal" {
+        load_optimal(dir)
+    } else {
+        load_or_generate(dir)
+    }
+    .map_err(|err| {
         eprintln!("solve: {err}");
         ExitCode::from(1)
     })?;

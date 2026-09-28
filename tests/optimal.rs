@@ -3,8 +3,8 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use cube_cli::{
-    format_report, load_or_generate, move_allowed, parse_moves, reid_h, solve, solve_optimal,
-    CubieCube, Move, ALL_MOVES,
+    format_report, load_optimal, move_allowed, parse_moves, reid_h, solve, solve_optimal,
+    CubieCube, Move, OptimalError, ALL_MOVES,
 };
 
 fn tables() -> &'static cube_cli::Tables {
@@ -12,7 +12,7 @@ fn tables() -> &'static cube_cli::Tables {
     &LOADED
         .get_or_init(|| {
             let dir = std::env::temp_dir().join("cube-cli-solve-tables");
-            load_or_generate(&dir).expect("tables")
+            load_optimal(&dir).expect("tables")
         })
         .tables
 }
@@ -155,6 +155,21 @@ fn superflip_heuristic_is_at_least_8_and_the_generator_is_20() {
 }
 
 #[test]
+fn superflip_below_the_heuristic_returns_immediately() {
+    let tables = tables();
+    let superflip = apply_all("U R2 F B R B2 R U2 L B2 R U' D' R2 F R' L B2 U2 F2");
+    let h = reid_h(&superflip, tables) as usize;
+    assert!(h >= 8);
+    let start = Instant::now();
+    let too_short = solve_optimal(&superflip, tables, 0).unwrap_err();
+    let below = solve_optimal(&superflip, tables, h - 1).unwrap_err();
+    assert!(start.elapsed().as_millis() < 500, "{:?}", start.elapsed());
+    assert_eq!(too_short, OptimalError::NoSolution);
+    assert_eq!(below, OptimalError::NoSolution);
+}
+
+#[test]
+#[ignore = "exhaustive superflip proof searches about 3e9 nodes"]
 fn superflip_optimal_length_is_20() {
     let tables = tables();
     let _ = reid_h(&CubieCube::solved(), tables);

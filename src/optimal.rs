@@ -100,6 +100,7 @@ impl std::fmt::Display for OptimalError {
 
 impl std::error::Error for OptimalError {}
 
+#[derive(Debug)]
 pub struct OptimalSolve {
     pub moves: Vec<Move>,
     pub nodes: u64,
@@ -185,6 +186,12 @@ fn corner_distance() -> &'static [u8] {
     })
 }
 
+fn phase1(tables: &Tables) -> &[u8] {
+    tables
+        .phase1_prun()
+        .expect("optimal search requires phase1_prun.bin")
+}
+
 /// Distance lower bound. Zero only for the solved cube.
 pub fn reid_h(cube: &CubieCube, tables: &Tables) -> u8 {
     if *cube == CubieCube::solved() {
@@ -192,7 +199,7 @@ pub fn reid_h(cube: &CubieCube, tables: &Tables) -> u8 {
     }
     let index = sym_index();
     let axes = axes_of(cube, index);
-    let phase = axis_bound(&axes, index, tables.phase1_prun());
+    let phase = axis_bound(&axes, index, phase1(tables));
     let corners = corner_distance()[cube.corners() as usize];
     phase.max(corners)
 }
@@ -359,7 +366,7 @@ fn search_from(
     let conj = conj_moves(index);
     let axes = axes_of(cube, index);
     let succ = successors();
-    let prun = tables.phase1_prun();
+    let prun = phase1(tables);
     let bits = if lower >= 8 {
         Some(phase_bits(prun))
     } else {
@@ -407,15 +414,17 @@ pub fn solve_optimal(
             nodes: 0,
         });
     }
-    if is_superflip(cube) {
-        return solve_superflip(cube, tables, max_bound);
-    }
     let mut lower = reid_h(cube, tables) as usize;
     if lower == 0 {
         lower = 1;
     }
     if lower > max_bound {
         return Err(OptimalError::NoSolution);
+    }
+    // The superflip certificate searches a reduced position through depth 17.
+    // Skip it unless the caller asked for a solution at least that long.
+    if is_superflip(cube) && max_bound >= upper_superflip_len() {
+        return solve_superflip(cube, tables, max_bound);
     }
     let solved = search_from(cube, tables, lower, max_bound, None)?;
     replay(cube, &solved.moves)?;
@@ -456,15 +465,27 @@ fn superflip_upper() -> Result<Vec<Move>, OptimalError> {
     Ok(inverse)
 }
 
+fn upper_superflip_len() -> usize {
+    parse_moves(SUPERFLIP_GENERATOR)
+        .expect("superflip generator")
+        .len()
+}
+
 /// Reid: superflip is at most 19 moves only if `superflip U R2` is at most 17.
 /// Proving the reduced cube has no solution through 17 proves superflip is 20,
 /// because the generator is an explicit 20-move solution.
+///
+/// Caller must already have rejected `max_bound` below the heuristic, and must
+/// only call this when `max_bound` can hold the 20-move certificate.
 fn solve_superflip(
     cube: &CubieCube,
     tables: &Tables,
     max_bound: usize,
 ) -> Result<OptimalSolve, OptimalError> {
     let upper = superflip_upper()?;
+    if upper.len() > max_bound {
+        return Err(OptimalError::NoSolution);
+    }
     let mut reduced = *cube;
     reduced.apply(Move::U1);
     reduced.apply(Move::R2);
@@ -496,7 +517,7 @@ fn prove_beyond(
     let conj = conj_moves(index);
     let root_axes = axes_of(cube, index);
     let succ = successors();
-    let prun = tables.phase1_prun();
+    let prun = phase1(tables);
     let bits = phase_bits(prun);
     let root_dist = raw_dist(index, prun, &root_axes);
     let found = AtomicBool::new(false);

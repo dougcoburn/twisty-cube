@@ -13,7 +13,10 @@
 //! * `prune_flip_slice.bin` 1,013,760 — two-phase lower bound, `u8`
 //! * `prune_corners.bin` 967,680 — phase-2 corners × slice perm, `u8`
 //! * `prune_ud_edges.bin` 967,680 — phase-2 UD-edges × slice perm, `u8`
-//! * `phase1_prun.bin` 140,908,410 — exact moves to H_UD, symmetry-reduced, `u8`
+//!
+//! `manifest.bin` covers those ten files. `phase1_prun.bin` (140,908,410 bytes,
+//! exact moves to H_UD) and `phase1_manifest.bin` are built only by
+//! `load_optimal`. Two-phase search does not read them.
 //!
 //! The split two-phase prunes are lower bounds. `phase1_prun.bin` is the exact
 //! distance to H_UD, indexed by flip-slice symmetry class (64430) then twist (2187).
@@ -41,8 +44,12 @@ pub const TABLE_BUDGET: u64 = 200 * 1024 * 1024;
 pub const UD_EDGES_INVALID: u16 = u16::MAX;
 
 const UNSEEN: u8 = 255;
-const FORMAT_VERSION: u32 = 2;
+/// Two-phase manifest. Version 3 dropped `phase1_prun.bin` from this file.
+const FORMAT_VERSION: u32 = 3;
+const PHASE1_VERSION: u32 = 1;
 const MANIFEST: &str = "manifest.bin";
+const PHASE1_FILE: &str = "phase1_prun.bin";
+const PHASE1_MANIFEST: &str = "phase1_manifest.bin";
 const MANIFEST_MAGIC: &[u8; 4] = b"CUBT";
 
 struct Spec {
@@ -50,7 +57,7 @@ struct Spec {
     bytes: usize,
 }
 
-fn specs() -> [Spec; 11] {
+fn specs() -> [Spec; 10] {
     [
         Spec {
             name: "twist_move.bin",
@@ -92,10 +99,6 @@ fn specs() -> [Spec; 11] {
             name: "prune_ud_edges.bin",
             bytes: N_UD_EDGES * N_SLICE_PERM,
         },
-        Spec {
-            name: "phase1_prun.bin",
-            bytes: N_PHASE1,
-        },
     ]
 }
 
@@ -117,7 +120,7 @@ pub struct Tables {
     prune_flip_slice: Mmap,
     prune_corners: Mmap,
     prune_ud_edges: Mmap,
-    phase1_prun: Mmap,
+    phase1_prun: Option<Mmap>,
 }
 
 impl LoadedTables {
@@ -174,8 +177,9 @@ impl Tables {
         self.prune_ud_edges[ud as usize * N_SLICE_PERM + slice_perm as usize]
     }
 
-    pub fn phase1_prun(&self) -> &[u8] {
-        &self.phase1_prun
+    /// Exact phase-1 distances. `None` until `load_optimal` maps them.
+    pub fn phase1_prun(&self) -> Option<&[u8]> {
+        self.phase1_prun.as_deref()
     }
 
     /// `(name, max depth, unfilled count)` for the four prune tables.
@@ -190,7 +194,9 @@ impl Tables {
     }
 }
 
-/// Build any missing table file, then map the directory.
+/// Build any missing two-phase table, then map the directory.
+///
+/// Does not build `phase1_prun.bin`. Call `load_optimal` for that.
 pub fn load_or_generate(dir: &Path) -> io::Result<LoadedTables> {
     fs::create_dir_all(dir)?;
     let mapped = checksums_match(dir);
@@ -229,6 +235,105 @@ pub fn load_or_generate(dir: &Path) -> io::Result<LoadedTables> {
     })
 }
 
+/// Two-phase tables plus the exact phase-1 prune used by optimal search.
+///
+/// A directory that already has a valid two-phase manifest only gains
+/// `phase1_prun.bin` when that file is missing or its manifest does not match.
+pub fn load_optimal(dir: &Path) -> io::Result<LoadedTables> {
+    let mut loaded = load_or_generate(dir)?;
+    let had_phase1 = phase1_checksum_ok(dir);
+    if !had_phase1 {
+        let twist = read_u16_table(&dir.join("twist_move.bin"), N_TWIST * MOVE_COUNT)?;
+        let flip = read_u16_table(&dir.join("flip_move.bin"), N_FLIP * MOVE_COUNT)?;
+        let slice = read_u16_table(&dir.join("slice_move.bin"), N_SLICE * MOVE_COUNT)?;
+        let phase1 = build_phase1_prun(&twist, &flip, &slice)?;
+        write_phase1(dir, &phase1)?;
+    }
+    if !phase1_checksum_ok(dir) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "wrote phase1 prune that does not match its manifest",
+        ));
+    }
+    loaded.tables.phase1_prun = Some(map_file(&dir.join(PHASE1_FILE), N_PHASE1)?);
+    loaded
+        .files
+        .push((dir.join(PHASE1_FILE).display().to_string(), N_PHASE1 as u64));
+    let manifest_len = fs::metadata(dir.join(PHASE1_MANIFEST))?.len();
+    loaded.files.push((
+        dir.join(PHASE1_MANIFEST).display().to_string(),
+        manifest_len,
+    ));
+    let total = loaded.total_bytes();
+    if total > TABLE_BUDGET {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("tables are {total} bytes, over the {TABLE_BUDGET} byte budget"),
+        ));
+    }
+    loaded.mapped = loaded.mapped && had_phase1;
+    Ok(loaded)
+}
+
+fn read_u16_table(path: &Path, count: usize) -> io::Result<Vec<u16>> {
+    let bytes = fs::read(path)?;
+    if bytes.len() != count * 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} has {} bytes, expected {}",
+                path.display(),
+                bytes.len(),
+                count * 2
+            ),
+        ));
+    }
+    Ok(bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect())
+}
+
+fn write_phase1(dir: &Path, bytes: &[u8]) -> io::Result<()> {
+    if bytes.len() != N_PHASE1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{PHASE1_FILE} is {} bytes, expected {N_PHASE1}",
+                bytes.len()
+            ),
+        ));
+    }
+    write_atomic(dir, PHASE1_FILE, bytes)?;
+    write_atomic(
+        dir,
+        PHASE1_MANIFEST,
+        &manifest_bytes(PHASE1_VERSION, &[crc32(bytes)]),
+    )?;
+    Ok(())
+}
+
+fn phase1_checksum_ok(dir: &Path) -> bool {
+    let Ok(manifest) = fs::read(dir.join(PHASE1_MANIFEST)) else {
+        return false;
+    };
+    if manifest.len() != 12 || &manifest[..4] != MANIFEST_MAGIC {
+        return false;
+    }
+    let version = u32::from_le_bytes(manifest[4..8].try_into().unwrap());
+    if version != PHASE1_VERSION {
+        return false;
+    }
+    let Ok(bytes) = fs::read(dir.join(PHASE1_FILE)) else {
+        return false;
+    };
+    if bytes.len() != N_PHASE1 {
+        return false;
+    }
+    let stored = u32::from_le_bytes(manifest[8..12].try_into().unwrap());
+    crc32(&bytes) == stored
+}
+
 struct Built {
     twist_move: Vec<u16>,
     flip_move: Vec<u16>,
@@ -240,7 +345,6 @@ struct Built {
     prune_flip_slice: Vec<u8>,
     prune_corners: Vec<u8>,
     prune_ud_edges: Vec<u8>,
-    phase1_prun: Vec<u8>,
 }
 
 fn build_tables() -> io::Result<Built> {
@@ -300,7 +404,6 @@ fn build_tables() -> io::Result<Built> {
     require_filled("flip×slice", &prune_flip_slice)?;
     require_filled("corners×slice", &prune_corners)?;
     require_filled("ud-edges×slice", &prune_ud_edges)?;
-    let phase1_prun = build_phase1_prun(&twist_move, &flip_move, &slice_move)?;
 
     Ok(Built {
         twist_move,
@@ -313,7 +416,6 @@ fn build_tables() -> io::Result<Built> {
         prune_flip_slice,
         prune_corners,
         prune_ud_edges,
-        phase1_prun,
     })
 }
 
@@ -456,7 +558,7 @@ fn require_filled(name: &str, dist: &[u8]) -> io::Result<()> {
 }
 
 fn write_tables(dir: &Path, built: &Built) -> io::Result<()> {
-    let files: [(&str, Vec<u8>); 11] = [
+    let files: [(&str, Vec<u8>); 10] = [
         ("twist_move.bin", u16_bytes(&built.twist_move)),
         ("flip_move.bin", u16_bytes(&built.flip_move)),
         ("slice_move.bin", u16_bytes(&built.slice_move)),
@@ -467,7 +569,6 @@ fn write_tables(dir: &Path, built: &Built) -> io::Result<()> {
         ("prune_flip_slice.bin", built.prune_flip_slice.clone()),
         ("prune_corners.bin", built.prune_corners.clone()),
         ("prune_ud_edges.bin", built.prune_ud_edges.clone()),
-        ("phase1_prun.bin", built.phase1_prun.clone()),
     ];
     for (name, bytes) in &files {
         let expected = specs()
@@ -487,7 +588,7 @@ fn write_tables(dir: &Path, built: &Built) -> io::Result<()> {
         .iter()
         .map(|(_, bytes)| crc32(bytes))
         .collect::<Vec<_>>();
-    write_atomic(dir, MANIFEST, &manifest_bytes(&crcs))?;
+    write_atomic(dir, MANIFEST, &manifest_bytes(FORMAT_VERSION, &crcs))?;
     Ok(())
 }
 
@@ -538,10 +639,10 @@ fn checksums_match(dir: &Path) -> bool {
     true
 }
 
-fn manifest_bytes(crcs: &[u32]) -> Vec<u8> {
+fn manifest_bytes(version: u32, crcs: &[u32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(8 + 4 * crcs.len());
     out.extend_from_slice(MANIFEST_MAGIC);
-    out.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+    out.extend_from_slice(&version.to_le_bytes());
     for crc in crcs {
         out.extend_from_slice(&crc.to_le_bytes());
     }
@@ -584,7 +685,7 @@ fn map_tables(dir: &Path) -> io::Result<Tables> {
         prune_flip_slice: maps.next().unwrap(),
         prune_corners: maps.next().unwrap(),
         prune_ud_edges: maps.next().unwrap(),
-        phase1_prun: maps.next().unwrap(),
+        phase1_prun: None,
     })
 }
 
