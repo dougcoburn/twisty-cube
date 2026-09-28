@@ -8,7 +8,7 @@ pub const CORNER_COUNT: usize = 8;
 /// Edges: UR UF UL UB DR DF DL DB FR FL BL BR.
 pub const EDGE_COUNT: usize = 12;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CubieCube {
     pub cp: [u8; CORNER_COUNT],
     pub co: [u8; CORNER_COUNT],

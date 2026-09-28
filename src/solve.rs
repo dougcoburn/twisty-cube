@@ -235,3 +235,20 @@ pub fn format_solution(moves: &[Move]) -> String {
             .join(" ")
     }
 }
+
+/// `moves` on the first line when nonempty, then `length` and `optimal`.
+pub fn format_report(moves: &[Move], optimal: bool) -> String {
+    let mut out = String::new();
+    if !moves.is_empty() {
+        out.push_str(
+            &moves
+                .iter()
+                .map(|mv| mv.name())
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+        out.push('\n');
+    }
+    out.push_str(&format!("length: {}\noptimal: {optimal}\n", moves.len()));
+    out
+}

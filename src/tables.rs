@@ -1,10 +1,22 @@
-//! Move tables and split pruning tables for two-phase search.
+//! Move tables and pruning tables.
 //!
-//! Raw little-endian files live in `tables/`, with a versioned CRC-32 manifest.
-//! A later run maps those files only when every checksum matches. Depths are
-//! uncompressed `u8` values. Phase 1 is pruned on twist×slice and flip×slice;
-//! phase 2 on corners×slice permutation and UD-edges×slice permutation.
-//! No symmetry reduction.
+//! Files in `tables/`, little-endian, checked by `manifest.bin` (magic `CUBT`,
+//! format version, then one IEEE CRC-32 per file):
+//!
+//! * `twist_move.bin` 78,732 bytes — twist × 18 moves, `u16`
+//! * `flip_move.bin` 73,728 — flip × 18, `u16`
+//! * `slice_move.bin` 17,820 — UD-slice combination × 18, `u16`
+//! * `slice_sorted_move.bin` 427,680 — sorted slice × 18, `u16`
+//! * `corners_move.bin` 1,451,520 — corner perm × 18, `u16`
+//! * `ud_edges_move.bin` 1,451,520 — UD-edge perm × 18, `u16` (`u16::MAX` outside H)
+//! * `prune_twist_slice.bin` 1,082,565 — two-phase lower bound, `u8`
+//! * `prune_flip_slice.bin` 1,013,760 — two-phase lower bound, `u8`
+//! * `prune_corners.bin` 967,680 — phase-2 corners × slice perm, `u8`
+//! * `prune_ud_edges.bin` 967,680 — phase-2 UD-edges × slice perm, `u8`
+//! * `phase1_prun.bin` 140,908,410 — exact moves to H_UD, symmetry-reduced, `u8`
+//!
+//! The split two-phase prunes are lower bounds. `phase1_prun.bin` is the exact
+//! distance to H_UD, indexed by flip-slice symmetry class (64430) then twist (2187).
 
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -13,6 +25,7 @@ use std::path::Path;
 use memmap2::Mmap;
 
 use crate::moves::{phase2_move, Move, ALL_MOVES, MOVE_COUNT, PHASE2_MOVES};
+use crate::sym::{sym_index, N_PHASE1, N_SYM};
 use crate::CubieCube;
 
 pub const N_TWIST: usize = 2187;
@@ -28,7 +41,7 @@ pub const TABLE_BUDGET: u64 = 200 * 1024 * 1024;
 pub const UD_EDGES_INVALID: u16 = u16::MAX;
 
 const UNSEEN: u8 = 255;
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 const MANIFEST: &str = "manifest.bin";
 const MANIFEST_MAGIC: &[u8; 4] = b"CUBT";
 
@@ -37,7 +50,7 @@ struct Spec {
     bytes: usize,
 }
 
-fn specs() -> [Spec; 10] {
+fn specs() -> [Spec; 11] {
     [
         Spec {
             name: "twist_move.bin",
@@ -79,6 +92,10 @@ fn specs() -> [Spec; 10] {
             name: "prune_ud_edges.bin",
             bytes: N_UD_EDGES * N_SLICE_PERM,
         },
+        Spec {
+            name: "phase1_prun.bin",
+            bytes: N_PHASE1,
+        },
     ]
 }
 
@@ -100,6 +117,7 @@ pub struct Tables {
     prune_flip_slice: Mmap,
     prune_corners: Mmap,
     prune_ud_edges: Mmap,
+    phase1_prun: Mmap,
 }
 
 impl LoadedTables {
@@ -154,6 +172,10 @@ impl Tables {
 
     pub fn prune_ud_edges(&self, ud: u16, slice_perm: u16) -> u8 {
         self.prune_ud_edges[ud as usize * N_SLICE_PERM + slice_perm as usize]
+    }
+
+    pub fn phase1_prun(&self) -> &[u8] {
+        &self.phase1_prun
     }
 
     /// `(name, max depth, unfilled count)` for the four prune tables.
@@ -218,6 +240,7 @@ struct Built {
     prune_flip_slice: Vec<u8>,
     prune_corners: Vec<u8>,
     prune_ud_edges: Vec<u8>,
+    phase1_prun: Vec<u8>,
 }
 
 fn build_tables() -> io::Result<Built> {
@@ -277,6 +300,7 @@ fn build_tables() -> io::Result<Built> {
     require_filled("flip×slice", &prune_flip_slice)?;
     require_filled("corners×slice", &prune_corners)?;
     require_filled("ud-edges×slice", &prune_ud_edges)?;
+    let phase1_prun = build_phase1_prun(&twist_move, &flip_move, &slice_move)?;
 
     Ok(Built {
         twist_move,
@@ -289,7 +313,77 @@ fn build_tables() -> io::Result<Built> {
         prune_flip_slice,
         prune_corners,
         prune_ud_edges,
+        phase1_prun,
     })
+}
+
+fn build_phase1_prun(
+    twist_move: &[u16],
+    flip_move: &[u16],
+    slice_move: &[u16],
+) -> io::Result<Vec<u8>> {
+    let index = sym_index();
+    let mut dist = vec![UNSEEN; N_PHASE1];
+    let mut queue = Vec::with_capacity(1 << 16);
+    dist[0] = 0;
+    queue.push(0u32);
+    let mut head = 0usize;
+    let mut filled = 1usize;
+    let mut reported = 0u8;
+    while head < queue.len() {
+        let state = queue[head] as usize;
+        head += 1;
+        let class = state / N_TWIST;
+        let twist = state % N_TWIST;
+        let depth = dist[state];
+        if depth > reported {
+            reported = depth;
+            eprintln!("phase1 depth {depth}, filled {filled}");
+        }
+        let flip = index.rep_flip[class] as usize;
+        let slice = index.rep_slice[class] as usize;
+        for m in 0..MOVE_COUNT {
+            let twist1 = twist_move[twist * MOVE_COUNT + m] as usize;
+            let flip1 = flip_move[flip * MOVE_COUNT + m] as usize;
+            let slice1 = slice_move[slice * MOVE_COUNT + m] as usize;
+            let fs1 = slice1 * 2048 + flip1;
+            let class1 = index.classidx[fs1] as usize;
+            let sym1 = index.sym[fs1] as usize;
+            let twist_c = index.twist_conj[twist1 * N_SYM + sym1] as usize;
+            let idx1 = class1 * N_TWIST + twist_c;
+            if dist[idx1] != UNSEEN {
+                continue;
+            }
+            let next_depth = depth + 1;
+            dist[idx1] = next_depth;
+            queue.push(idx1 as u32);
+            filled += 1;
+            let mask = index.stab[class1];
+            if mask == 1 {
+                continue;
+            }
+            for k in 1..N_SYM {
+                if (mask >> k) & 1 == 0 {
+                    continue;
+                }
+                let twist2 = index.twist_conj[twist_c * N_SYM + k] as usize;
+                let idx2 = class1 * N_TWIST + twist2;
+                if dist[idx2] == UNSEEN {
+                    dist[idx2] = next_depth;
+                    queue.push(idx2 as u32);
+                    filled += 1;
+                }
+            }
+        }
+    }
+    if filled != N_PHASE1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("phase1 prune filled {filled} of {N_PHASE1}"),
+        ));
+    }
+    eprintln!("phase1 complete at depth {reported}, filled {filled}");
+    Ok(dist)
 }
 
 fn move_table(n: usize, make: fn(u16) -> CubieCube, read: fn(&CubieCube) -> u16) -> Vec<u16> {
@@ -362,7 +456,7 @@ fn require_filled(name: &str, dist: &[u8]) -> io::Result<()> {
 }
 
 fn write_tables(dir: &Path, built: &Built) -> io::Result<()> {
-    let files: [(&str, Vec<u8>); 10] = [
+    let files: [(&str, Vec<u8>); 11] = [
         ("twist_move.bin", u16_bytes(&built.twist_move)),
         ("flip_move.bin", u16_bytes(&built.flip_move)),
         ("slice_move.bin", u16_bytes(&built.slice_move)),
@@ -373,6 +467,7 @@ fn write_tables(dir: &Path, built: &Built) -> io::Result<()> {
         ("prune_flip_slice.bin", built.prune_flip_slice.clone()),
         ("prune_corners.bin", built.prune_corners.clone()),
         ("prune_ud_edges.bin", built.prune_ud_edges.clone()),
+        ("phase1_prun.bin", built.phase1_prun.clone()),
     ];
     for (name, bytes) in &files {
         let expected = specs()
@@ -489,6 +584,7 @@ fn map_tables(dir: &Path) -> io::Result<Tables> {
         prune_flip_slice: maps.next().unwrap(),
         prune_corners: maps.next().unwrap(),
         prune_ud_edges: maps.next().unwrap(),
+        phase1_prun: maps.next().unwrap(),
     })
 }
 

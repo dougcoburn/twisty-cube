@@ -2,14 +2,19 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 use cube_cli::{
-    cubie_from_facelets, format_solution, load_or_generate, parse_moves, solve, CubieCube,
+    cubie_from_facelets, format_report, load_or_generate, parse_moves, solve, solve_optimal,
+    CubieCube,
 };
 
 #[derive(Parser)]
-#[command(name = "cube-cli", about = "Two-phase Rubik's cube solver")]
+#[command(
+    name = "cube-cli",
+    about = "Two-phase and optimal HTM Rubik's cube solver"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -23,7 +28,7 @@ enum Command {
         #[arg(long, default_value = "tables")]
         dir: PathBuf,
     },
-    /// Solve a cube with the two-phase algorithm. Stops at the first solution of length ≤20.
+    /// Solve a cube. `twophase` is fast; `optimal` returns a shortest HTM solution.
     Solve {
         /// 54 facelets in URFDLB order.
         #[arg(long)]
@@ -31,12 +36,15 @@ enum Command {
         /// Singmaster maneuver applied to a solved cube, for example "R U R' U'".
         #[arg(long)]
         moves: Option<String>,
-        /// Solver mode. Only `twophase` is implemented.
+        /// `twophase` (default, not always shortest) or `optimal` (shortest face turns).
         #[arg(long, default_value = "twophase")]
         mode: String,
         /// Directory of raw table files. Created if missing.
         #[arg(long, default_value = "tables")]
         dir: PathBuf,
+        /// Largest length optimal search will prove. Ignored by twophase.
+        #[arg(long, default_value_t = 20)]
+        max_bound: usize,
     },
 }
 
@@ -65,43 +73,72 @@ fn main() -> ExitCode {
             moves,
             mode,
             dir,
-        } => {
-            if mode != "twophase" {
-                eprintln!("unknown mode {mode:?}; only twophase is implemented");
-                return ExitCode::from(2);
+            max_bound,
+        } => match solve_cli(facelets, moves, &mode, &dir, max_bound) {
+            Ok(report) => {
+                print!("{report}");
+                ExitCode::SUCCESS
             }
-            match solve_cli(facelets, moves, &dir) {
-                Ok(line) => {
-                    println!("{line}");
-                    ExitCode::SUCCESS
-                }
-                Err(err) => {
-                    eprintln!("solve: {err}");
-                    ExitCode::from(1)
-                }
-            }
-        }
+            Err(code) => code,
+        },
     }
 }
 
 fn solve_cli(
     facelets: Option<String>,
     moves: Option<String>,
+    mode: &str,
     dir: &std::path::Path,
-) -> Result<String, String> {
+    max_bound: usize,
+) -> Result<String, ExitCode> {
+    if mode != "twophase" && mode != "optimal" {
+        eprintln!("unknown mode {mode:?}; use twophase or optimal");
+        return Err(ExitCode::from(2));
+    }
     let cube = match (facelets, moves) {
-        (Some(facelets), None) => cubie_from_facelets(&facelets).map_err(|err| err.to_string())?,
+        (Some(facelets), None) => cubie_from_facelets(&facelets).map_err(|err| {
+            eprintln!("solve: {err}");
+            ExitCode::from(1)
+        })?,
         (None, Some(moves)) => {
             let mut cube = CubieCube::solved();
-            for mv in parse_moves(&moves)? {
+            for mv in parse_moves(&moves).map_err(|err| {
+                eprintln!("solve: {err}");
+                ExitCode::from(1)
+            })? {
                 cube.apply(mv);
             }
             cube
         }
-        (Some(_), Some(_)) => return Err("pass either --facelets or --moves, not both".to_string()),
-        (None, None) => return Err("pass --facelets or --moves".to_string()),
+        (Some(_), Some(_)) => {
+            eprintln!("solve: pass either --facelets or --moves, not both");
+            return Err(ExitCode::from(1));
+        }
+        (None, None) => {
+            eprintln!("solve: pass --facelets or --moves");
+            return Err(ExitCode::from(1));
+        }
     };
-    let loaded = load_or_generate(dir).map_err(|err| err.to_string())?;
-    let solution = solve(&cube, &loaded.tables).map_err(|err| err.to_string())?;
-    Ok(format_solution(&solution))
+    let loaded = load_or_generate(dir).map_err(|err| {
+        eprintln!("solve: {err}");
+        ExitCode::from(1)
+    })?;
+    if mode == "twophase" {
+        let solution = solve(&cube, &loaded.tables).map_err(|err| {
+            eprintln!("solve: {err}");
+            ExitCode::from(1)
+        })?;
+        return Ok(format_report(&solution, false));
+    }
+    let started = Instant::now();
+    let solved = solve_optimal(&cube, &loaded.tables, max_bound).map_err(|err| {
+        eprintln!("solve: {err}");
+        ExitCode::from(1)
+    })?;
+    eprintln!(
+        "nodes: {} time: {:.3}s",
+        solved.nodes,
+        started.elapsed().as_secs_f64()
+    );
+    Ok(format_report(&solved.moves, true))
 }

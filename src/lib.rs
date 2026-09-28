@@ -1,10 +1,12 @@
-//! Cubie-level cube group, facelets, coordinates, tables, and two-phase search.
+//! Cubie-level cube group, facelets, coordinates, tables, and solvers.
 
 mod coords;
 mod cubie;
 mod facelets;
 mod moves;
+mod optimal;
 mod solve;
+mod sym;
 mod tables;
 
 pub use coords::{
@@ -18,7 +20,8 @@ pub use moves::{
     move_allowed, next_move_mask, parse_moves, phase2_move, Move, ALL_MOVES, MOVE_COUNT, MOVE_CUBE,
     PHASE2_MOVES,
 };
-pub use solve::{format_solution, solve, SolveError};
+pub use optimal::{reid_h, solve_optimal, OptimalError, OptimalSolve};
+pub use solve::{format_report, format_solution, solve, SolveError};
 pub use tables::{
     load_or_generate, LoadedTables, Tables, N_CORNERS, N_FLIP, N_SLICE, N_SLICE_PERM,
     N_SLICE_SORTED, N_TWIST, N_UD_EDGES, TABLE_BUDGET, UD_EDGES_INVALID,
