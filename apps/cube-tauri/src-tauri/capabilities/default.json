@@ -3,12 +3,5 @@
   "identifier": "default",
   "description": "Cube Bench main window",
   "windows": ["main"],
-  "permissions": [
-    "core:default",
-    "allow-get-solved",
-    "allow-apply-moves",
-    "allow-validate-facelets",
-    "allow-scramble",
-    "allow-solve-twophase"
-  ]
+  "permissions": ["core:default"]
 }
