@@ -402,6 +402,7 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
   window.addEventListener("keydown", onKey);
 
   renderMoves();
+  const stopTables = watchTableEvents(note);
   void api.getSolved().then(
     (state) => {
       facelets = state.facelets;
@@ -414,6 +415,7 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
   return () => {
     generation += 1;
     playing = false;
+    stopTables();
     observer.disconnect();
     window.removeEventListener("keydown", onKey);
     scene.dispose();
@@ -425,6 +427,28 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
 function messageOf(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   return "Something went wrong";
+}
+
+function watchTableEvents(note: (message: string, tone?: "ok" | "bad" | "muted") => void): () => void {
+  if (!("__TAURI_INTERNALS__" in window)) return () => undefined;
+  const stop: Array<() => void> = [];
+  let closed = false;
+  void import("@tauri-apps/api/event").then(async ({ listen }) => {
+    const unlistenProgress = await listen<string>("tables-progress", (event) => {
+      note(event.payload, "muted");
+    });
+    const unlistenDone = await listen<string>("tables-done", () => undefined);
+    if (closed) {
+      unlistenProgress();
+      unlistenDone();
+      return;
+    }
+    stop.push(unlistenProgress, unlistenDone);
+  });
+  return () => {
+    closed = true;
+    for (const unlisten of stop) unlisten();
+  };
 }
 
 function el(tag: string, className: string): HTMLElement {

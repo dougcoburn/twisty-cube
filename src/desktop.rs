@@ -104,19 +104,105 @@ pub fn random_scramble(n: u32) -> Vec<Move> {
     out
 }
 
-/// Directories checked for `manifest.bin`, in order.
+/// Directories the CLI checks for `manifest.bin`, in order.
 ///
 /// `CARGO_MANIFEST_DIR/tables` is the cube-cli crate root, so `cargo tauri dev`
 /// finds `./tables` next to the solver even when the shell's cwd is `src-tauri`.
 pub fn tables_candidates() -> Vec<PathBuf> {
+    dev_table_dirs()
+}
+
+/// Desktop search order.
+///
+/// `resource_dirs` are bundle resource paths (`resource_dir()/tables`). They are
+/// read-only inside a Mac App Store `.app`. Nothing here is a place to write.
+pub fn desktop_table_dirs(resource_dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    if let Ok(dir) = std::env::var("CUBE_TABLES") {
-        if !dir.is_empty() {
-            dirs.push(PathBuf::from(dir));
-        }
+    if let Some(dir) = cube_tables_env() {
+        dirs.push(dir);
     }
-    dirs.push(PathBuf::from("tables"));
-    dirs.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tables"));
+    dirs.extend(resource_dirs.iter().cloned());
+    if let Some(dir) = app_support_tables_dir() {
+        dirs.push(dir);
+    }
+    dirs.extend(dev_table_dirs_without_env());
+    dirs
+}
+
+/// `true` when every desktop candidate is missing `manifest.bin`.
+pub fn desktop_tables_missing(resource_dirs: &[PathBuf]) -> bool {
+    !desktop_table_dirs(resource_dirs)
+        .iter()
+        .any(|dir| dir.join("manifest.bin").is_file())
+}
+
+/// Writable tables directory for a packaged app. Never a path inside the `.app`.
+pub fn app_support_tables_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let base = PathBuf::from(home);
+    #[cfg(target_os = "macos")]
+    let dir = base.join("Library/Application Support/com.dougcoburn.faceturn/tables");
+    #[cfg(not(target_os = "macos"))]
+    let dir = base.join(".local/share/com.dougcoburn.faceturn/tables");
+    Some(dir)
+}
+
+pub fn find_tables_dir() -> Result<PathBuf, DesktopError> {
+    first_tables_dir(&tables_candidates()).ok_or_else(|| missing_tables(&tables_candidates(), None))
+}
+
+/// Use an existing tables directory, or generate into Application Support.
+///
+/// Does not write next to the executable or into a bundle resource directory.
+pub fn ensure_desktop_tables(resource_dirs: &[PathBuf]) -> Result<PathBuf, DesktopError> {
+    let dirs = desktop_table_dirs(resource_dirs);
+    if let Some(dir) = first_tables_dir(&dirs) {
+        return Ok(dir);
+    }
+    let Some(support) = app_support_tables_dir() else {
+        return Err(missing_tables(&dirs, None));
+    };
+    if let Err(err) = std::fs::create_dir_all(&support) {
+        return Err(missing_tables(
+            &dirs,
+            Some(format!("could not create {}: {err}", support.display())),
+        ));
+    }
+    match load_or_generate(&support) {
+        Ok(_) => Ok(support),
+        Err(err) => Err(missing_tables(
+            &dirs,
+            Some(format!(
+                "first-run generate into {} failed: {err}",
+                support.display()
+            )),
+        )),
+    }
+}
+
+fn cube_tables_env() -> Option<PathBuf> {
+    let dir = std::env::var("CUBE_TABLES").ok()?;
+    if dir.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(dir))
+    }
+}
+
+fn dev_table_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(dir) = cube_tables_env() {
+        dirs.push(dir);
+    }
+    dirs.extend(dev_table_dirs_without_env());
+    dirs
+}
+
+fn dev_table_dirs_without_env() -> Vec<PathBuf> {
+    let mut dirs = vec![
+        PathBuf::from("tables"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tables"),
+    ];
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             dirs.push(dir.join("tables"));
@@ -125,21 +211,22 @@ pub fn tables_candidates() -> Vec<PathBuf> {
     dirs
 }
 
-pub fn find_tables_dir() -> Result<PathBuf, DesktopError> {
-    let dirs = tables_candidates();
-    for dir in &dirs {
-        if dir.join("manifest.bin").is_file() {
-            return Ok(dir.clone());
-        }
-    }
+fn first_tables_dir(dirs: &[PathBuf]) -> Option<PathBuf> {
+    dirs.iter()
+        .find(|dir| dir.join("manifest.bin").is_file())
+        .cloned()
+}
+
+fn missing_tables(dirs: &[PathBuf], detail: Option<String>) -> DesktopError {
     let listed = dirs
         .iter()
         .map(|dir| dir.display().to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    Err(DesktopError::MissingTables(format!(
-        "two-phase tables not found (no manifest.bin in {listed}). Run `cube-cli gen-tables` first."
-    )))
+    let extra = detail.map(|text| format!(" {text}.")).unwrap_or_default();
+    DesktopError::MissingTables(format!(
+        "two-phase tables not found (no manifest.bin in {listed}).{extra} Reinstall the app or run `cube-cli gen-tables`."
+    ))
 }
 
 /// Solve with tables already generated in `dir`. Does not build them.
@@ -151,7 +238,7 @@ pub fn solve_twophase(cube: &CubieCube, dir: &Path) -> Result<TwophaseSolution, 
             dir.display()
         )));
     }
-    let loaded = load_or_generate(dir).map_err(|err| {
+    let loaded = crate::tables::load_existing(dir).map_err(|err| {
         DesktopError::MissingTables(format!(
             "could not load tables at {}: {err}. Run `cube-cli gen-tables --dir {}` first.",
             dir.display(),

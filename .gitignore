@@ -4,3 +4,11 @@
 /apps/cube-tauri/dist
 /apps/cube-tauri/src-tauri/target
 /apps/cube-tauri/src-tauri/gen
+*.p8
+*.p12
+*.cer
+*.provisionprofile
+*.mobileprovision
+AuthKey_*.p8
+apps/cube-tauri/src-tauri/embedded.provisionprofile
+

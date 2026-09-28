@@ -57,3 +57,51 @@ fn missing_tables_are_an_error_without_building_them() {
     assert!(text.contains("gen-tables"), "{text}");
     assert!(!dir.join("manifest.bin").exists());
 }
+
+#[test]
+fn desktop_dirs_check_resources_then_support_then_dev_paths() {
+    let resource = std::env::temp_dir().join(format!(
+        "faceturn-resource-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let dirs = cube_cli::desktop_table_dirs(&[resource.clone()]);
+    let resource_at = dirs.iter().position(|dir| dir == &resource).unwrap();
+    let cwd_at = dirs
+        .iter()
+        .position(|dir| dir == std::path::Path::new("tables"))
+        .unwrap();
+    let support = cube_cli::app_support_tables_dir().expect("home");
+    let support_at = dirs.iter().position(|dir| dir == &support).unwrap();
+    assert!(resource_at < support_at);
+    assert!(support_at < cwd_at);
+    let rendered = support.to_string_lossy();
+    assert!(
+        rendered.ends_with("com.dougcoburn.faceturn/tables"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains(".app"), "{rendered}");
+}
+
+#[test]
+fn ensure_desktop_tables_reads_a_resource_dir_without_writing() {
+    let dir = std::env::temp_dir().join(format!(
+        "faceturn-bundle-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("manifest.bin"), b"stub").unwrap();
+    let before = std::fs::read(dir.join("manifest.bin")).unwrap();
+    let found = cube_cli::ensure_desktop_tables(&[dir.clone()]).unwrap();
+    assert_eq!(std::fs::read(dir.join("manifest.bin")).unwrap(), before);
+    if std::env::var_os("CUBE_TABLES").is_none() {
+        assert_eq!(found, dir);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
