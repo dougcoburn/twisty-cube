@@ -126,6 +126,7 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
   let playing = false;
   let playbackBusy = false;
   let generation = 0;
+  let solveEpoch = 0;
   let chain: Promise<void> = Promise.resolve();
   let armedDouble = false;
 
@@ -203,6 +204,7 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
   }
 
   function enqueue(token: string): Promise<void> {
+    solveEpoch += 1;
     const gen = generation;
     const run = chain.then(async () => {
       if (!current(gen)) return;
@@ -298,6 +300,7 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
 
   async function onSolve() {
     const requested = facelets;
+    const epoch = ++solveEpoch;
     playing = false;
     generation += 1;
     const gen = generation;
@@ -308,7 +311,7 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
     note("Solving…");
     try {
       const result = await api.solveTwophase(requested);
-      if (!current(gen) || facelets !== requested) {
+      if (epoch !== solveEpoch || !current(gen) || facelets !== requested) {
         if (current(gen)) note("Solve discarded; the cube changed");
         return;
       }
