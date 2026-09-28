@@ -139,5 +139,7 @@ export function inverseMove(token: string): string {
 export function turnRadians(token: string): number {
   const spec = MOVE_SPEC[token];
   if (!spec) return 0;
-  return spec.quarter * spec.times * (Math.PI / 2);
+  // +Y in Three.js is the opposite of rot90's clockwise-from-above quarter.
+  const handed = spec.axis === "y" ? -1 : 1;
+  return handed * spec.quarter * spec.times * (Math.PI / 2);
 }
