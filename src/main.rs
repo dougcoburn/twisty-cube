@@ -13,7 +13,7 @@ use cube_cli::{
 #[derive(Parser)]
 #[command(
     name = "cube-cli",
-    about = "Two-phase and optimal HTM Rubik's cube solver"
+    about = "Two-phase and optimal HTM 3x3 solver"
 )]
 struct Cli {
     #[command(subcommand)]

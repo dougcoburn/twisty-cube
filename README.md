@@ -1,4 +1,5 @@
-# Cube Bench
+# twisty-cube
+CLI: `cube-cli`. Desktop app: FaceTurn Cube Solver.
 
 Two-phase and optimal HTM solver, plus a desktop shell that shows the cube.
 
@@ -12,8 +13,9 @@ Two-phase search reads `manifest.bin` and the ten table files next to it. It doe
 cargo run --release --bin cube-cli -- gen-tables
 ```
 
-That writes `./tables` (gitignored). The desktop shell looks for `manifest.bin` in this order:
+`gen-tables` writes about **7.2 MB** into `./tables` (gitignored).
 
+The desktop shell looks for `manifest.bin` in this order:
 1. `$CUBE_TABLES`
 2. `./tables` from the current working directory
 3. `tables/` beside this crate (`CARGO_MANIFEST_DIR`)
@@ -50,3 +52,10 @@ cargo test
 ```
 
 `solve_twophase` on a solved cube is empty, and applying a two-phase solution to a 5-move scramble returns to solved. The exhaustive superflip proof stays `#[ignore]`.
+
+## License
+Licensed under MIT. See LICENSE.
+
+## Credits
+Two-phase search follows Kociemba. Optimal search follows Reid (1997).
+Not affiliated with Spin Master or the Rubik’s Brand.

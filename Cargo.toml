@@ -2,7 +2,9 @@
 name = "cube-cli"
 version = "0.1.0"
 edition = "2021"
-description = "Two-phase and optimal Rubik's cube solver"
+description = "Two-phase and optimal 3x3 cube solver"
+license = "MIT"
+repository = "https://github.com/dougcoburn/twisty-cube"
 
 [lib]
 name = "cube_cli"

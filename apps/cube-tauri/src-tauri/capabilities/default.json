@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Cube Bench main window",
+  "description": "FaceTurn Cube Solver main window",
   "windows": ["main"],
   "permissions": ["core:default"]
 }

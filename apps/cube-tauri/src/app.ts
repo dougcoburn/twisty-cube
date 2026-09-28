@@ -18,7 +18,7 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
 
   const header = el("header", "cube-header");
   const title = el("div", "cube-title");
-  title.append(text("h1", "Cube Bench"), text("p", "Two-phase playback on a 3×3"));
+  title.append(text("h1", "FaceTurn Cube Solver"), text("p", "Two-phase playback on a 3×3"));
   header.append(title);
 
   const stage = el("div", "cube-stage");

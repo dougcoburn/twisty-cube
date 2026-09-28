@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Cube Bench",
+  "productName": "FaceTurn Cube Solver",
   "version": "0.1.0",
-  "identifier": "app.cubebench.desktop",
+  "identifier": "com.dougcoburn.faceturn",
   "build": {
     "beforeDevCommand": {
       "script": "npm run dev",
@@ -19,7 +19,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Cube Bench",
+        "title": "FaceTurn Cube Solver",
         "width": 1180,
         "height": 800,
         "minWidth": 720,
