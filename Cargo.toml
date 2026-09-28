@@ -4,9 +4,17 @@ version = "0.1.0"
 edition = "2021"
 description = "Two-phase and optimal Rubik's cube solver"
 
+[lib]
+name = "cube_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "cube-cli"
 path = "src/main.rs"
+
+[[bin]]
+name = "cube-preview"
+path = "src/bin/cube-preview.rs"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }

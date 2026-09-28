@@ -2,6 +2,7 @@
 
 mod coords;
 mod cubie;
+mod desktop;
 mod facelets;
 mod moves;
 mod optimal;
@@ -15,6 +16,11 @@ pub use coords::{
     ud_slice, ud_slice_sorted, unrank_permutation,
 };
 pub use cubie::{CubeCoords, CubeError, CubieCube};
+pub use desktop::{
+    apply_move, apply_moves, facelets_after_moves, find_tables_dir, is_solved, parse_facelets,
+    random_scramble, scramble_facelets, solve_twophase, solve_twophase_default, solved,
+    tables_candidates, to_facelets, DesktopError, TwophaseSolution,
+};
 pub use facelets::{cubie_from_facelets, facelets_from_cubie, FACELET_COUNT, SOLVED_FACELETS};
 pub use moves::{
     move_allowed, next_move_mask, parse_moves, phase2_move, Move, ALL_MOVES, MOVE_COUNT, MOVE_CUBE,

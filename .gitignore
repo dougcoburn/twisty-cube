@@ -1,2 +1,6 @@
 /target
 /tables
+/apps/cube-tauri/node_modules
+/apps/cube-tauri/dist
+/apps/cube-tauri/src-tauri/target
+/apps/cube-tauri/src-tauri/gen
