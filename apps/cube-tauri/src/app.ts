@@ -124,6 +124,7 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
   let startFacelets = facelets;
   let index = 0;
   let playing = false;
+  let playbackBusy = false;
   let generation = 0;
   let chain: Promise<void> = Promise.resolve();
   let armedDouble = false;
@@ -153,19 +154,21 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
         const chip = button(token, "chip");
         if (i === index) chip.classList.add("is-current");
         else if (i < index) chip.classList.add("is-done");
+        chip.disabled = playbackBusy || playing;
         chip.addEventListener("click", () => jump(i));
         item.append(chip);
         moveList.append(item);
       });
     }
     const max = moves.length;
+    const busy = playbackBusy || playing;
     slider.max = String(max);
     slider.value = String(Math.min(index, max));
-    slider.disabled = solution === null;
+    slider.disabled = solution === null || busy;
     sliderRead.textContent = `${index} / ${max}`;
-    playBtn.disabled = solution === null || index >= (solution?.length ?? 0);
-    backBtn.disabled = solution === null || index === 0;
-    fwdBtn.disabled = solution === null || index >= (solution?.length ?? 0);
+    playBtn.disabled = busy || solution === null || index >= (solution?.length ?? 0);
+    backBtn.disabled = busy || solution === null || index === 0;
+    fwdBtn.disabled = busy || solution === null || index >= (solution?.length ?? 0);
   }
 
   function clearSolution() {
@@ -294,79 +297,102 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
   }
 
   async function onSolve() {
+    const requested = facelets;
     playing = false;
     generation += 1;
+    const gen = generation;
     chain = Promise.resolve();
     scene.release();
-    scene.setFacelets(facelets);
+    scene.setFacelets(requested);
     solveBtn.disabled = true;
     note("Solving…");
     try {
-      const result = await api.solveTwophase(facelets);
-      startFacelets = facelets;
+      const result = await api.solveTwophase(requested);
+      if (!current(gen) || facelets !== requested) {
+        if (current(gen)) note("Solve discarded; the cube changed");
+        return;
+      }
+      startFacelets = requested;
       solution = result.moves;
       index = 0;
       note(`length ${result.length} · optimal false · ${result.elapsedMs} ms`, "ok");
       renderMoves();
     } catch (error) {
-      note(messageOf(error), "bad");
+      if (current(gen)) note(messageOf(error), "bad");
     } finally {
       solveBtn.disabled = false;
     }
   }
 
   async function stepForward() {
-    if (!solution || playing || index >= solution.length) return;
+    if (!solution || playing || playbackBusy || index >= solution.length) return;
+    playbackBusy = true;
+    renderMoves();
     const token = solution[index]!;
     const gen = generation;
-    const lived = await scene.animateTurn(token, duration(token), () => current(gen));
-    if (!lived || !current(gen) || !solution) {
-      if (current(gen)) scene.setFacelets(facelets);
-      return;
-    }
-    index += 1;
-    facelets = applyMoves(startFacelets, solution.slice(0, index));
-    scene.setFacelets(facelets);
-    faceInput.value = facelets;
-    renderMoves();
-  }
-
-  async function stepBack() {
-    if (!solution || playing || index === 0) return;
-    const token = inverseMove(solution[index - 1]!);
-    const gen = generation;
-    const lived = await scene.animateTurn(token, duration(token), () => current(gen));
-    if (!lived || !current(gen) || !solution) {
-      if (current(gen)) scene.setFacelets(facelets);
-      return;
-    }
-    index -= 1;
-    facelets = applyMoves(startFacelets, solution.slice(0, index));
-    scene.setFacelets(facelets);
-    faceInput.value = facelets;
-    renderMoves();
-  }
-
-  async function onPlay() {
-    if (!solution || playing || index >= solution.length) return;
-    playing = true;
-    playBtn.disabled = true;
-    const gen = generation;
-    while (playing && solution && index < solution.length && current(gen)) {
-      const token = solution[index]!;
-      const lived = await scene.animateTurn(token, duration(token), () => current(gen) && playing);
-      if (!lived || !playing || !current(gen) || !solution) {
+    try {
+      const lived = await scene.animateTurn(token, duration(token), () => current(gen));
+      if (!lived || !current(gen) || !solution) {
         if (current(gen)) scene.setFacelets(facelets);
-        break;
+        return;
       }
       index += 1;
       facelets = applyMoves(startFacelets, solution.slice(0, index));
       scene.setFacelets(facelets);
       faceInput.value = facelets;
+    } finally {
+      playbackBusy = false;
       renderMoves();
     }
-    playing = false;
+  }
+
+  async function stepBack() {
+    if (!solution || playing || playbackBusy || index === 0) return;
+    playbackBusy = true;
     renderMoves();
+    const token = inverseMove(solution[index - 1]!);
+    const gen = generation;
+    try {
+      const lived = await scene.animateTurn(token, duration(token), () => current(gen));
+      if (!lived || !current(gen) || !solution) {
+        if (current(gen)) scene.setFacelets(facelets);
+        return;
+      }
+      index -= 1;
+      facelets = applyMoves(startFacelets, solution.slice(0, index));
+      scene.setFacelets(facelets);
+      faceInput.value = facelets;
+    } finally {
+      playbackBusy = false;
+      renderMoves();
+    }
+  }
+
+  async function onPlay() {
+    if (!solution || playing || playbackBusy || index >= solution.length) return;
+    playing = true;
+    playbackBusy = true;
+    renderMoves();
+    const gen = generation;
+    try {
+      while (playing && solution && index < solution.length && current(gen)) {
+        const token = solution[index]!;
+        const lived = await scene.animateTurn(token, duration(token), () => current(gen) && playing);
+        if (!lived || !playing || !current(gen) || !solution) {
+          if (current(gen)) scene.setFacelets(facelets);
+          break;
+        }
+        index += 1;
+        facelets = applyMoves(startFacelets, solution.slice(0, index));
+        scene.setFacelets(facelets);
+        faceInput.value = facelets;
+        renderMoves();
+      }
+    } finally {
+      playing = false;
+      playbackBusy = false;
+      renderMoves();
+    }
   }
 
   function onKey(event: KeyboardEvent) {
@@ -425,7 +451,12 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
 }
 
 function messageOf(error: unknown): string {
+  if (typeof error === "string" && error.trim()) return error;
   if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = error.message;
+    if (typeof message === "string" && message) return message;
+  }
   return "Something went wrong";
 }
 
