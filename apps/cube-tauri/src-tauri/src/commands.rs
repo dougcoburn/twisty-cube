@@ -7,20 +7,20 @@ use cube_cli::{
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CubeState {
+pub struct CubeState {
     facelets: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ScrambleOk {
+pub struct ScrambleOk {
     moves: Vec<String>,
     facelets: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SolveOk {
+pub struct SolveOk {
     moves: Vec<String>,
     length: usize,
     optimal: bool,
