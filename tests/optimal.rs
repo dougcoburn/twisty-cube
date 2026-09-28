@@ -155,7 +155,6 @@ fn superflip_heuristic_is_at_least_8_and_the_generator_is_20() {
 }
 
 #[test]
-#[ignore = "Reid's heuristic is 10 on superflip and the search branches by about 13, so bound 16 is already 5e7 nodes"]
 fn superflip_optimal_length_is_20() {
     let tables = tables();
     let _ = reid_h(&CubieCube::solved(), tables);
