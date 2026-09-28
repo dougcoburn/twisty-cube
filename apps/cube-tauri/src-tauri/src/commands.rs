@@ -1,6 +1,5 @@
 use serde::Serialize;
 use tauri::Emitter;
-use tauri::Manager;
 
 use cube_cli::{
     desktop_tables_missing, ensure_desktop_tables, facelets_after_moves, parse_facelets,
@@ -64,15 +63,14 @@ pub fn scramble(n: u32) -> ScrambleOk {
 
 #[tauri::command]
 pub async fn solve_twophase(app: tauri::AppHandle, facelets: String) -> Result<SolveOk, String> {
-    let resources = resource_table_dirs(&app);
-    let generating = desktop_tables_missing(&resources);
+    let generating = desktop_tables_missing();
     if generating {
         let _ = app.emit(
             "tables-progress",
             "Generating two-phase tables into Application Support…",
         );
     }
-    let result = tauri::async_runtime::spawn_blocking(move || solve_blocking(facelets, resources))
+    let result = tauri::async_runtime::spawn_blocking(move || solve_blocking(facelets))
         .await
         .map_err(|err| format!("solve task failed: {err}"))?;
     if generating && result.is_ok() {
@@ -81,16 +79,9 @@ pub async fn solve_twophase(app: tauri::AppHandle, facelets: String) -> Result<S
     result
 }
 
-fn resource_table_dirs(app: &tauri::AppHandle) -> Vec<std::path::PathBuf> {
-    match app.path().resource_dir() {
-        Ok(dir) => vec![dir.join("tables")],
-        Err(_) => Vec::new(),
-    }
-}
-
-fn solve_blocking(facelets: String, resources: Vec<std::path::PathBuf>) -> Result<SolveOk, String> {
+fn solve_blocking(facelets: String) -> Result<SolveOk, String> {
     let cube = parse_facelets(&facelets).map_err(|err| err.to_string())?;
-    let dir = ensure_desktop_tables(&resources).map_err(|err| err.to_string())?;
+    let dir = ensure_desktop_tables().map_err(|err| err.to_string())?;
     let solved = search_twophase(&cube, &dir).map_err(|err| err.to_string())?;
     Ok(SolveOk {
         length: solved.moves.len(),

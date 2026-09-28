@@ -18,17 +18,13 @@ cargo run --release --bin cube-cli -- gen-tables
 The desktop shell looks for `manifest.bin` in this order:
 
 1. `$CUBE_TABLES` (dev override)
-2. `tables/` inside the app bundle (`resource_dir()/tables`)
-3. Application Support `com.dougcoburn.faceturn/tables` (macOS: `~/Library/Application Support/…`; elsewhere `~/.local/share/…`)
-4. `./tables` from the current working directory
-5. `tables/` beside this crate (`CARGO_MANIFEST_DIR`)
-6. `tables/` beside the executable
+2. `./tables` from the current working directory
+3. `tables/` beside this crate (`CARGO_MANIFEST_DIR`)
+4. Application Support `com.dougcoburn.faceturn/tables` (macOS: `~/Library/Application Support/…`, which the App Sandbox redirects into the container; elsewhere `~/.local/share/…`)
 
-The CLI (`cube-cli` and `cube-preview`) still uses only `$CUBE_TABLES`, `./tables`, the crate directory, and the executable directory. It does not generate into Application Support.
+`cube-cli` uses `$CUBE_TABLES`, `./tables`, the crate directory, and `tables/` beside the executable. It does not generate into Application Support.
 
-Solve never writes into the `.app`. If no directory above has `manifest.bin`, the desktop app generates into Application Support on a background thread and emits `tables-progress` / `tables-done`. If that generate fails, Solve names the paths it tried and says to reinstall the app or run `cube-cli gen-tables`.
-
-`cargo tauri build` copies `../../../tables/` into the bundle as `tables/`. That directory is gitignored. A Mac App Store or release build has to run `gen-tables` first; `src-tauri/build.rs` prints a warning when `manifest.bin` is absent. The binaries are not committed.
+FaceTurn does not ship the table files inside the `.app`, and it never writes there. If none of the directories above already contain `manifest.bin`, the first Solve generates about **7.2 MB** into Application Support on a background thread and emits `tables-progress` / `tables-done`. Later launches reuse that directory. `./tables` stays gitignored.
 
 ## Desktop app
 
@@ -96,15 +92,15 @@ export APPLE_API_ISSUER="your-issuer-id"
 
 The `.p8` must be named `AuthKey_$APPLE_API_KEY_ID.p8` and live in one of the directories `altool` searches (`~/private_keys`, `~/.private_keys`, `~/.appstoreconnect/private_keys`).
 
-### Tables in the bundle
+### Tables
 
-From the repo root, before `tauri build`:
+The Mac App Store build does not bundle `tables/`. On first Solve, if `manifest.bin` is not already in `$CUBE_TABLES` or the repo `./tables`, FaceTurn runs the same generator as `cube-cli gen-tables` on a background thread and writes about **7.2 MB** to:
 
-```bash
-cargo run --release --bin cube-cli -- gen-tables
+```text
+~/Library/Application Support/com.dougcoburn.faceturn/tables
 ```
 
-That writes about 7.2 MB into `./tables`. The bundle maps that directory to `Contents/Resources/tables`. At runtime the app reads it from `resource_dir()/tables` and never writes there. First launch with no bundled tables generates into `~/Library/Application Support/com.dougcoburn.faceturn/tables` instead.
+Inside the App Sandbox that path is the container for bundle id `com.dougcoburn.faceturn`. Later launches reuse it. The app never writes into the `.app`. For `cargo tauri dev`, generate or point at a checkout with `cube-cli gen-tables` or `$CUBE_TABLES` so the first click does not have to build the tables.
 
 ### Build the .app and the .pkg
 
@@ -134,7 +130,7 @@ xcrun altool --upload-app --type macos --file "FaceTurn Cube Solver.pkg" \
   --apiKey "$APPLE_API_KEY_ID" --apiIssuer "$APPLE_API_ISSUER"
 ```
 
-After a sandboxed build, confirm the window opens, Shuffle → Solve → Play still finishes solved, and Console has no sandbox denials for that path. Tables should come from the bundle or from Application Support, not from inside the `.app` as a write.
+After a sandboxed build, confirm the window opens, Shuffle → Solve → Play still finishes solved, and Console has no sandbox denials for that path. The first Solve creates the tables under Application Support. They are not inside the `.app`.
 
 ## License
 Licensed under MIT. See LICENSE.
