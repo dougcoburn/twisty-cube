@@ -210,6 +210,21 @@ pub fn load_or_generate(dir: &Path) -> io::Result<LoadedTables> {
             ));
         }
     }
+    finish_load(dir, mapped)
+}
+
+/// Map tables that are already on disk. Does not create or rewrite files.
+pub(crate) fn load_existing(dir: &Path) -> io::Result<LoadedTables> {
+    if !checksums_match(dir) {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "tables are missing or do not match manifest.bin",
+        ));
+    }
+    finish_load(dir, true)
+}
+
+fn finish_load(dir: &Path, mapped: bool) -> io::Result<LoadedTables> {
     let tables = map_tables(dir)?;
     let mut files = specs()
         .into_iter()

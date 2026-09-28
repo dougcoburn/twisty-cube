@@ -1,8 +1,10 @@
 use serde::Serialize;
+use tauri::Emitter;
+use tauri::Manager;
 
 use cube_cli::{
-    facelets_after_moves, find_tables_dir, parse_facelets, scramble_facelets,
-    solve_twophase as search_twophase, to_facelets, CubieCube,
+    desktop_tables_missing, ensure_desktop_tables, facelets_after_moves, parse_facelets,
+    scramble_facelets, solve_twophase as search_twophase, to_facelets, CubieCube,
 };
 
 #[derive(Serialize)]
@@ -61,15 +63,34 @@ pub fn scramble(n: u32) -> ScrambleOk {
 }
 
 #[tauri::command]
-pub async fn solve_twophase(facelets: String) -> Result<SolveOk, String> {
-    tauri::async_runtime::spawn_blocking(move || solve_blocking(facelets))
+pub async fn solve_twophase(app: tauri::AppHandle, facelets: String) -> Result<SolveOk, String> {
+    let resources = resource_table_dirs(&app);
+    let generating = desktop_tables_missing(&resources);
+    if generating {
+        let _ = app.emit(
+            "tables-progress",
+            "Generating two-phase tables into Application Support…",
+        );
+    }
+    let result = tauri::async_runtime::spawn_blocking(move || solve_blocking(facelets, resources))
         .await
-        .map_err(|err| format!("solve task failed: {err}"))?
+        .map_err(|err| format!("solve task failed: {err}"))?;
+    if generating && result.is_ok() {
+        let _ = app.emit("tables-done", "Two-phase tables are ready.");
+    }
+    result
 }
 
-fn solve_blocking(facelets: String) -> Result<SolveOk, String> {
+fn resource_table_dirs(app: &tauri::AppHandle) -> Vec<std::path::PathBuf> {
+    match app.path().resource_dir() {
+        Ok(dir) => vec![dir.join("tables")],
+        Err(_) => Vec::new(),
+    }
+}
+
+fn solve_blocking(facelets: String, resources: Vec<std::path::PathBuf>) -> Result<SolveOk, String> {
     let cube = parse_facelets(&facelets).map_err(|err| err.to_string())?;
-    let dir = find_tables_dir().map_err(|err| err.to_string())?;
+    let dir = ensure_desktop_tables(&resources).map_err(|err| err.to_string())?;
     let solved = search_twophase(&cube, &dir).map_err(|err| err.to_string())?;
     Ok(SolveOk {
         length: solved.moves.len(),
