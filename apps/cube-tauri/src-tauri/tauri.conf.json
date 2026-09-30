@@ -4,16 +4,12 @@
   "version": "0.1.0",
   "identifier": "com.dougcoburn.faceturn",
   "build": {
-    "beforeDevCommand": {
-      "script": "npm run dev",
+    "beforeBuildCommand": {
+      "script": "npm run build && rm -rf src-tauri/ui && mkdir -p src-tauri/ui && cp -R dist/. src-tauri/ui/",
       "cwd": ".."
     },
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": {
-      "script": "npm run build",
-      "cwd": ".."
-    },
-    "frontendDist": "../dist"
+    "frontendDist": "ui"
   },
   "app": {
     "windows": [
@@ -50,10 +46,14 @@
       "minimumSystemVersion": "12.0",
       "entitlements": "./Entitlements.plist",
       "infoPlist": "./Info.plist",
-      "bundleVersion": "3",
+      "bundleVersion": "5",
       "files": {
         "embedded.provisionprofile": "../FaceTurn_Cube_Solver_ProvProf.provisionprofile"
       }
-    }
+    },
+    "resources": [
+      "../dist/index.html",
+      "../dist/assets"
+    ]
   }
 }
