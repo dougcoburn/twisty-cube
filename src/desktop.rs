@@ -182,6 +182,35 @@ pub fn ensure_desktop_tables() -> Result<PathBuf, DesktopError> {
     }
 }
 
+/// Use this directory for a packaged app. Generates with `gen-tables` when
+/// `manifest.bin` is missing. Refuses any path inside a `.app`.
+pub fn ensure_tables_at(dir: &Path) -> Result<PathBuf, DesktopError> {
+    if dir
+        .components()
+        .any(|component| component.as_os_str().to_string_lossy().ends_with(".app"))
+    {
+        return Err(DesktopError::MissingTables(
+            "refusing to write two-phase tables inside the .app bundle".into(),
+        ));
+    }
+    if dir.join("manifest.bin").is_file() {
+        return Ok(dir.to_path_buf());
+    }
+    if let Err(err) = std::fs::create_dir_all(dir) {
+        return Err(DesktopError::MissingTables(format!(
+            "could not create {}: {err}",
+            dir.display()
+        )));
+    }
+    match load_or_generate(dir) {
+        Ok(_) => Ok(dir.to_path_buf()),
+        Err(err) => Err(DesktopError::MissingTables(format!(
+            "first-run generate into {} failed: {err}",
+            dir.display()
+        ))),
+    }
+}
+
 fn cube_tables_env() -> Option<PathBuf> {
     let dir = std::env::var("CUBE_TABLES").ok()?;
     if dir.is_empty() {
