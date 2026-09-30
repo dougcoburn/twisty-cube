@@ -116,8 +116,21 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
   host.append(header, stage);
 
   const scene = new CubeScene(viewport);
-  const observer = new ResizeObserver(() => scene.resize());
-  observer.observe(viewport);
+  const fitFields = () => {
+    const height = window.innerHeight;
+    if (height <= 640) {
+      faceInput.rows = 1;
+      moveInput.rows = 1;
+    } else if (height <= 820) {
+      faceInput.rows = 2;
+      moveInput.rows = 1;
+    } else {
+      faceInput.rows = 3;
+      moveInput.rows = 2;
+    }
+  };
+  fitFields();
+  window.addEventListener("resize", fitFields);
 
   let facelets = SOLVED_FACELETS;
   let solution: string[] | null = null;
@@ -445,7 +458,7 @@ export function mountCubeApp(host: HTMLElement, api: CubeApi): () => void {
     generation += 1;
     playing = false;
     stopTables();
-    observer.disconnect();
+    window.removeEventListener("resize", fitFields);
     window.removeEventListener("keydown", onKey);
     scene.dispose();
     host.replaceChildren();

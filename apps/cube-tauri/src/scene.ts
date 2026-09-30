@@ -47,6 +47,7 @@ export class CubeScene {
   private readonly cubies: Cubie[] = [];
   private frame = 0;
   private disposed = false;
+  private readonly resizeObserver: ResizeObserver;
 
   constructor(host: HTMLElement) {
     this.canvas = document.createElement("canvas");
@@ -98,6 +99,8 @@ export class CubeScene {
     this.controls.target.set(0, 0, 0);
 
     this.setFacelets(SOLVED_FACELETS);
+    this.resizeObserver = new ResizeObserver(() => this.resize());
+    this.resizeObserver.observe(host);
     this.resize();
     const loop = () => {
       if (this.disposed) return;
@@ -177,6 +180,7 @@ export class CubeScene {
 
   dispose(): void {
     this.disposed = true;
+    this.resizeObserver.disconnect();
     cancelAnimationFrame(this.frame);
     this.controls.dispose();
     this.renderer.dispose();
