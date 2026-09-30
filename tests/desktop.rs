@@ -107,3 +107,29 @@ fn ensure_desktop_tables_reuses_repo_tables_without_writing_support() {
     assert_ne!(found, support);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn ensure_tables_at_reuses_manifest_and_refuses_the_bundle() {
+    let dir = std::env::temp_dir().join(format!(
+        "faceturn-packaged-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("manifest.bin"), b"stub").unwrap();
+    let found = cube_cli::ensure_tables_at(&dir).unwrap();
+    assert_eq!(found, dir);
+    assert_eq!(std::fs::read(dir.join("manifest.bin")).unwrap(), b"stub");
+    let bundled = dir
+        .join("FaceTurn Cube Solver.app")
+        .join("Contents")
+        .join("Resources")
+        .join("tables");
+    let err = cube_cli::ensure_tables_at(&bundled).unwrap_err();
+    assert!(err.to_string().contains(".app"), "{err}");
+    assert!(!bundled.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

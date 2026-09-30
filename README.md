@@ -15,16 +15,16 @@ cargo run --release --bin cube-cli -- gen-tables
 
 `gen-tables` writes about **7.2 MB** into `./tables` (gitignored).
 
-The desktop shell looks for `manifest.bin` in this order:
+`cargo tauri dev` looks for `manifest.bin` in this order:
 
 1. `$CUBE_TABLES` (dev override)
 2. `./tables` from the current working directory
 3. `tables/` beside this crate (`CARGO_MANIFEST_DIR`)
-4. Application Support `com.dougcoburn.faceturn/tables` (macOS: `~/Library/Application Support/…`, which the App Sandbox redirects into the container; elsewhere `~/.local/share/…`)
+4. Application Support `com.dougcoburn.faceturn/tables` (macOS: `~/Library/Application Support/…`; elsewhere `~/.local/share/…`)
 
 `cube-cli` uses `$CUBE_TABLES`, `./tables`, the crate directory, and `tables/` beside the executable. It does not generate into Application Support.
 
-FaceTurn does not ship the table files inside the `.app`, and it never writes there. If none of the directories above already contain `manifest.bin`, the first Solve generates about **7.2 MB** into Application Support on a background thread and emits `tables-progress` / `tables-done`. Later launches reuse that directory. `./tables` stays gitignored.
+A packaged build does not use that list. `CARGO_MANIFEST_DIR` is compiled into the binary (`…/twisty-cube/tables` on the build machine) and is the wrong place inside TestFlight or the App Sandbox. Packaged FaceTurn uses Tauri `app_data_dir()/tables`, which on macOS is `~/Library/Application Support/com.dougcoburn.faceturn/tables` (the sandbox redirects that into the container). If `manifest.bin` is missing, the first Solve generates about **7.2 MB** there on a background thread with the same writer as `cube-cli gen-tables`. Later launches reuse it. Table files are not shipped inside the `.app`, and the app never writes there. `./tables` stays gitignored.
 
 ## Desktop app
 
@@ -94,13 +94,13 @@ The `.p8` must be named `AuthKey_$APPLE_API_KEY_ID.p8` and live in one of the di
 
 ### Tables
 
-The Mac App Store build does not bundle `tables/`. On first Solve, if `manifest.bin` is not already in `$CUBE_TABLES` or the repo `./tables`, FaceTurn runs the same generator as `cube-cli gen-tables` on a background thread and writes about **7.2 MB** to:
+The Mac App Store / TestFlight build does not bundle `tables/`. On first Solve, if `manifest.bin` is missing, FaceTurn runs the same generator as `cube-cli gen-tables` on a background thread and writes about **7.2 MB** to Tauri `app_data_dir()/tables`:
 
 ```text
 ~/Library/Application Support/com.dougcoburn.faceturn/tables
 ```
 
-Inside the App Sandbox that path is the container for bundle id `com.dougcoburn.faceturn`. Later launches reuse it. The app never writes into the `.app`. For `cargo tauri dev`, generate or point at a checkout with `cube-cli gen-tables` or `$CUBE_TABLES` so the first click does not have to build the tables.
+Inside the App Sandbox that path is the container for bundle id `com.dougcoburn.faceturn`. Later launches reuse it. The packaged app does not read `$CUBE_TABLES` or the repo `./tables` path baked in at compile time. It never writes into the `.app`. For `cargo tauri dev`, generate or point at a checkout with `cube-cli gen-tables` or `$CUBE_TABLES` so the first click does not have to build the tables.
 
 ### Build the .app and the .pkg
 

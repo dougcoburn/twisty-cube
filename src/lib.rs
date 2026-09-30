@@ -18,9 +18,9 @@ pub use coords::{
 pub use cubie::{CubeCoords, CubeError, CubieCube};
 pub use desktop::{
     app_support_tables_dir, apply_move, apply_moves, desktop_table_dirs, desktop_tables_missing,
-    ensure_desktop_tables, facelets_after_moves, find_tables_dir, is_solved, parse_facelets,
-    random_scramble, scramble_facelets, solve_twophase, solve_twophase_default, solved,
-    tables_candidates, to_facelets, DesktopError, TwophaseSolution,
+    ensure_desktop_tables, ensure_tables_at, facelets_after_moves, find_tables_dir, is_solved,
+    parse_facelets, random_scramble, scramble_facelets, solve_twophase, solve_twophase_default,
+    solved, tables_candidates, to_facelets, DesktopError, TwophaseSolution,
 };
 pub use facelets::{cubie_from_facelets, facelets_from_cubie, FACELET_COUNT, SOLVED_FACELETS};
 pub use moves::{

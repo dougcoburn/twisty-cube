@@ -2,8 +2,8 @@ use serde::Serialize;
 use tauri::Emitter;
 
 use cube_cli::{
-    desktop_tables_missing, ensure_desktop_tables, facelets_after_moves, parse_facelets,
-    scramble_facelets, solve_twophase as search_twophase, to_facelets, CubieCube,
+    desktop_tables_missing, ensure_desktop_tables, ensure_tables_at, facelets_after_moves,
+    parse_facelets, scramble_facelets, solve_twophase as search_twophase, to_facelets, CubieCube,
 };
 
 #[derive(Serialize)]
@@ -63,14 +63,19 @@ pub fn scramble(n: u32) -> ScrambleOk {
 
 #[tauri::command]
 pub async fn solve_twophase(app: tauri::AppHandle, facelets: String) -> Result<SolveOk, String> {
-    let generating = desktop_tables_missing();
+    let packaged = packaged_tables(&app)?;
+    let generating = match &packaged {
+        Some(dir) => !dir.join("manifest.bin").is_file(),
+        None => desktop_tables_missing(),
+    };
     if generating {
-        let _ = app.emit(
-            "tables-progress",
-            "Generating two-phase tables into Application Support…",
-        );
+        let message = match &packaged {
+            Some(dir) => format!("Generating two-phase tables into {}…", dir.display()),
+            None => "Generating two-phase tables into Application Support…".to_string(),
+        };
+        let _ = app.emit("tables-progress", message);
     }
-    let result = tauri::async_runtime::spawn_blocking(move || solve_blocking(facelets))
+    let result = tauri::async_runtime::spawn_blocking(move || solve_blocking(facelets, packaged))
         .await
         .map_err(|err| format!("solve task failed: {err}"))?;
     if generating && result.is_ok() {
@@ -79,9 +84,33 @@ pub async fn solve_twophase(app: tauri::AppHandle, facelets: String) -> Result<S
     result
 }
 
-fn solve_blocking(facelets: String) -> Result<SolveOk, String> {
+/// Packaged builds ignore `$CUBE_TABLES` and the compile-time repo path.
+/// `cargo tauri dev` keeps those and returns `None`.
+#[cfg(dev)]
+fn packaged_tables(_app: &tauri::AppHandle) -> Result<Option<std::path::PathBuf>, String> {
+    Ok(None)
+}
+
+#[cfg(not(dev))]
+fn packaged_tables(app: &tauri::AppHandle) -> Result<Option<std::path::PathBuf>, String> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("app data directory: {err}"))?
+        .join("tables");
+    Ok(Some(dir))
+}
+
+fn solve_blocking(
+    facelets: String,
+    packaged: Option<std::path::PathBuf>,
+) -> Result<SolveOk, String> {
     let cube = parse_facelets(&facelets).map_err(|err| err.to_string())?;
-    let dir = ensure_desktop_tables().map_err(|err| err.to_string())?;
+    let dir = match packaged {
+        Some(dir) => ensure_tables_at(&dir).map_err(|err| err.to_string())?,
+        None => ensure_desktop_tables().map_err(|err| err.to_string())?,
+    };
     let solved = search_twophase(&cube, &dir).map_err(|err| err.to_string())?;
     Ok(SolveOk {
         length: solved.moves.len(),
